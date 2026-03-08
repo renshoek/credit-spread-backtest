@@ -154,43 +154,49 @@ function runBacktest(shortOTMp, longOTMp, startCap, rfrPct, marginPct, startYear
     const spreadWidth = K1 - K2;
     const margPerSh   = Math.max(spreadWidth - netPrem, 0.01);
 
-    // Per-contract (100 shares)
-    const margPerCon  = margPerSh  * 100;
-    const premPerCon  = netPrem    * 100;
+    // ── PERCENTAGE-BASED SIZING (capital-independent) ──
+    // retOnMargin = how much we make/lose per unit of margin deployed.
+    //   Win:     +netPrem / margPerSh        (e.g. +8%)
+    //   Partial: (netPrem - (K1-S1)) / margPerSh
+    //   Full:    -1.0  (−100% of margin — long put absorbed the rest)
+    //
+    // Each month we deploy (cap × margFrac) as margin.
+    // dollarPnl = retOnMargin × cap × margFrac
+    //
+    // This means results are completely capital-independent.
+    // A €500 account and a €500,000 account see the same CAGR.
 
-    // Position sizing — cap margin at marginPct% of capital
-    const avail     = Math.max(cap, 0);
-    const maxMargin = avail * margFrac;
-    const contracts = Math.max(1, Math.floor(maxMargin / margPerCon));
+    let retOnMargin;
+    if      (S1 >= K1) retOnMargin =  netPrem / margPerSh;
+    else if (S1 <= K2) retOnMargin = -1.0;
+    else               retOnMargin = (netPrem - (K1 - S1)) / margPerSh;
 
-    // P&L per share:
-    //  Win:     S1 ≥ K1  → keep full net premium
-    //  Partial: K2 < S1 < K1 → premium minus intrinsic loss
-    //  Full:    S1 ≤ K2  → max loss = margPerSh (long put absorbed rest)
-    let pnlSh;
-    if      (S1 >= K1) pnlSh =  netPrem;
-    else if (S1 <= K2) pnlSh = -margPerSh;
-    else               pnlSh =  netPrem - (K1 - S1);
+    // Margin deployed this month (can be negative capital — still track 1 notional unit)
+    const margDeployed = Math.abs(cap) * margFrac;
+    const dollarPnl    = retOnMargin * margDeployed;
 
-    const dollarPnl      = pnlSh * 100 * contracts;
     cap += dollarPnl;                            // no floor — can go negative
     if (cap > peak) peak = cap;
 
-    const dd         = peak > 0 ? ((cap - peak) / peak) * 100 : 0;
-    const spyBnH     = startCap * (S1 / spyWindowBase);
-    const margDeploy = margPerCon * contracts;
-    const retPct     = (dollarPnl / margDeploy) * 100;
-    const retOnCap   = startCap > 0 ? (dollarPnl / startCap) * 100 : 0;
+    const dd       = peak > 0 ? ((cap - peak) / peak) * 100 : 0;
+    const spyBnH   = startCap * (S1 / spyWindowBase);
+    const retPct   = retOnMargin * 100;           // return on margin deployed
+    const retCapPct = retOnMargin * margFrac * 100; // return on total capital
+
+    // For tooltip display: approximate contract count at this capital level
+    const approxContracts = margPerSh > 0
+      ? Math.max(1, Math.round((Math.abs(cap) * margFrac) / (margPerSh * 100)))
+      : 1;
 
     monthly.push({
       date, year, S0, S1,
       K1: +K1.toFixed(2), K2: +K2.toFixed(2),
-      contracts,
-      premPerCon:  +premPerCon.toFixed(2),
-      margPerCon:  +margPerCon.toFixed(2),
-      margDeploy:  +margDeploy.toFixed(2),
+      contracts: approxContracts,
+      premPerSh:   +netPrem.toFixed(3),
+      margPerSh:   +margPerSh.toFixed(3),
+      margDeployed:+margDeployed.toFixed(2),
       retPct:      +retPct.toFixed(2),
-      retOnCap:    +retOnCap.toFixed(3),
+      retCapPct:   +retCapPct.toFixed(3),
       dollarPnl:   +dollarPnl.toFixed(2),
       cap:         +cap.toFixed(2),
       spyBnH:      +spyBnH.toFixed(2),
@@ -367,8 +373,8 @@ function renderMonthly(monthly) {
             const m=monthly[c.dataIndex];
             const label = m.scenario==='win'?'WIN':m.scenario==='full_loss'?'FULL LOSS':'PARTIAL';
             return[
-              `  ${label}: ${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(2)}%`,
-              `  P&L: ${fmtER(m.dollarPnl)}  ·  Contracts: ${m.contracts}`,
+              `  ${label}: ${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(2)}% on margin`,
+              `  P&L: ${fmtER(m.dollarPnl)}  (${(m.retCapPct>=0?'+':'')}${m.retCapPct.toFixed(2)}% on capital)`,
               `  SPY: ${m.S0}→${m.S1}  (${fmt((m.S1-m.S0)/m.S0*100,1)})`
             ];
           }
