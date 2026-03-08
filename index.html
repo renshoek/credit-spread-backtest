@@ -1,9 +1,10 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>PUT CREDIT SPREAD — BACKTEST ENGINE</title>
+  <title>Put Credit Spread — Backtest Engine</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
@@ -13,11 +14,12 @@
 <div class="wrap">
 
   <!-- ── HEADER ── -->
+
   <div class="header">
     <div class="header-left">
       <div class="header-badge">Strategy Engine</div>
       <div class="header-title">Put Credit Spread<br><span>Backtest Engine</span></div>
-      <div class="header-sub">SPY · 2000–2024 · Black-Scholes theoretical pricing</div>
+      <div class="header-sub">SPY &middot; 2000&ndash;2024 &middot; Black-Scholes theoretical pricing &middot; Contract-based sizing</div>
     </div>
     <div class="controls">
       <div class="ctrl">
@@ -25,11 +27,11 @@
         <input type="number" id="shortOTM" value="5" min="1" max="15" step="0.5">
       </div>
       <div class="ctrl">
-        <div class="ctrl-label">Spread width %</div>
+        <div class="ctrl-label">Long OTM %</div>
         <input type="number" id="longOTM" value="8" min="2" max="20" step="0.5">
       </div>
       <div class="ctrl">
-        <div class="ctrl-label">Capital €</div>
+        <div class="ctrl-label">Capital &euro;</div>
         <input type="number" id="capital" value="10000" min="500" max="100000" step="500">
       </div>
       <div class="ctrl">
@@ -41,47 +43,63 @@
   </div>
 
   <!-- ── STATS ── -->
+
   <div class="stats-grid" id="statsGrid"></div>
 
   <!-- ── TABS ── -->
+
   <div class="tabs-row">
     <button class="tab-btn active" data-tab="equity">Equity Curve</button>
     <button class="tab-btn" data-tab="monthly">Monthly P&amp;L</button>
     <button class="tab-btn" data-tab="annual">Annual Returns</button>
     <button class="tab-btn" data-tab="drawdown">Drawdown</button>
     <label class="chart-toggle" id="spyToggleWrap">
-      <input type="checkbox" id="spyToggle" checked> Compare SPY B&amp;H
+      <input type="checkbox" id="spyToggle" checked> SPY B&amp;H
     </label>
   </div>
 
-  <!-- ── CHART PANELS ── -->
+  <!-- ── PANELS ── -->
+
   <div class="chart-wrap">
-    <div class="tab-panel active" id="panel-equity">
-      <canvas id="chartEquity" height="340"></canvas>
-    </div>
-    <div class="tab-panel" id="panel-monthly">
-      <canvas id="chartMonthly" height="340"></canvas>
-    </div>
-    <div class="tab-panel" id="panel-annual">
-      <canvas id="chartAnnual" height="280"></canvas>
-      <div class="annual-grid" id="annualGrid"></div>
-    </div>
-    <div class="tab-panel" id="panel-drawdown">
-      <canvas id="chartDrawdown" height="340"></canvas>
-    </div>
+
+<div class="tab-panel active" id="panel-equity">
+  <canvas id="chartEquity" height="340"></canvas>
+</div>
+
+<div class="tab-panel" id="panel-monthly">
+  <canvas id="chartMonthly" height="340"></canvas>
+</div>
+
+<!-- Annual: chart in horizontal scroll container, grid below -->
+<div class="tab-panel" id="panel-annual">
+  <div class="annual-chart-scroll">
+    <canvas id="chartAnnual" height="260"></canvas>
+  </div>
+  <div class="annual-grid" id="annualGrid"></div>
+</div>
+
+<div class="tab-panel" id="panel-drawdown">
+  <canvas id="chartDrawdown" height="340"></canvas>
+</div>
+
   </div>
 
   <!-- ── DISCLAIMER ── -->
+
   <div class="disclaimer">
-    <strong>&#9888; IMPORTANT:</strong> Black-Scholes underestimates real premiums by 15–30% — actual strategy income is typically
-    higher due to the volatility risk premium (IV &gt; RV gap). Figures exclude IBKR commissions (~€1.30/trade),
-    bid-ask slippage, and Dutch Box 3 tax (36% on gains from 2028).
-    This is a theoretical model, not a guarantee of future performance.
-    Always paper-trade before deploying real capital.
+    <strong>&#9888; HOW THE MODEL WORKS:</strong>
+    Each month you sell a put at <em>Short OTM %</em> below SPY and simultaneously buy a put at <em>Long OTM %</em> below SPY.
+    The long put is your hard cap — you cannot lose more than (spread&nbsp;&minus;&nbsp;premium)&nbsp;&times;&nbsp;100 per contract, regardless of how far SPY falls.
+    Number of contracts = floor(capital&nbsp;/&nbsp;margin per contract), minimum&nbsp;1 — so recovery is always possible.
+    Capital has no floor and can go negative.
+    <br><br>
+    <strong>&#9888; LIMITATIONS:</strong>
+    Black-Scholes underestimates real premiums by 15&ndash;30% (IV&nbsp;&gt;&nbsp;RV gap means real income is higher).
+    Excludes IBKR commissions (~&euro;1.30/trade), bid-ask slippage, and Dutch Box&nbsp;3 tax (36% on gains from 2028).
+    Theoretical model only &mdash; always paper-trade before deploying real capital.
   </div>
 
 </div>
-
 <script src="backtest.js"></script>
 </body>
 </html>
