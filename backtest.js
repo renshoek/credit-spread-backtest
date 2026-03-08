@@ -618,6 +618,30 @@ document.getElementById('rfrMode').addEventListener('change', () => {
   if (rfrCtrl) rfrCtrl.style.display = document.getElementById('rfrMode').value === 'hist' ? 'none' : '';
 });
 
+// ── OPEN TRADE LOG WITH CURRENT PARAMS ──
+function openTradeLog() {
+  const p = getParams();
+  const q = new URLSearchParams({
+    shortOTM:  p.shortOTMp,
+    longOTM:   p.longOTMp,
+    dte:       p.dteDays,
+    capital:   p.startCap,
+    marginPct: p.marginPct,
+    skewShort: p.skewShort,
+    skewLong:  p.skewLong,
+    vixFloor:  p.vixFloor,
+    vixCeil:   p.vixCeil,
+    stopLoss:  p.stopLossMult,
+    slippage:  p.slippage,
+    rfrMode:   p.useHistRFR ? 'hist' : 'fixed',
+    rfr:       p.fixedRFR,
+    intraMonth:p.intraMonth ? '1' : '0',
+    startYear: p.startYear,
+    endYear:   p.endYear,
+  });
+  window.location.href = 'tradelog.html?' + q.toString();
+}
+
 // ── INIT ──
 populateYears();
 // Hide fixed RFR on load (historical is default)
