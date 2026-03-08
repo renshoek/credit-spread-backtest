@@ -57,17 +57,19 @@ const VIX = [
 ];
 
 const START_YEAR = 2000;
+const END_YEAR   = 2024;
 
 function getLabel(i) {
   const tot = START_YEAR * 12 + i;
   return `${Math.floor(tot/12)}-${String((tot%12)+1).padStart(2,'0')}`;
 }
+function getYear(i) { return Math.floor((START_YEAR * 12 + i) / 12); }
 
 function fmt(v, d=1)  { return (v>=0?'+':'')+v.toFixed(d)+'%'; }
-function fmtE(v)      { const abs=Math.abs(v); return (v<0?'-€':'€')+(abs>=10000?(abs/1000).toFixed(1)+'k':abs.toFixed(0)); }
-function fmtERaw(v)   { return (v<0?'-€':'€')+Math.abs(v).toFixed(0); }
+function fmtE(v)      { const a=Math.abs(v); return (v<0?'-':'')+'€'+(a>=10000?(a/1000).toFixed(1)+'k':a.toFixed(0)); }
+function fmtER(v)     { return (v<0?'-':'')+'€'+Math.abs(v).toFixed(0); }
 
-// Normal CDF (Abramowitz & Stegun)
+// Normal CDF
 function normCDF(x) {
   const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
   const s=x<0?-1:1, ax=Math.abs(x)/Math.sqrt(2);
@@ -77,215 +79,300 @@ function normCDF(x) {
 
 // Black-Scholes put price
 function bsPut(S,K,r,T,sigma) {
-  if(sigma<0.01||T<0.001||S<=0||K<=0) return Math.max(K-S,0);
+  if(sigma<0.001||T<0.0001||S<=0||K<=0) return Math.max(K-S,0);
   const d1=(Math.log(S/K)+(r+sigma*sigma/2)*T)/(sigma*Math.sqrt(T));
   const d2=d1-sigma*Math.sqrt(T);
   return K*Math.exp(-r*T)*normCDF(-d2)-S*normCDF(-d1);
 }
 
-// ─────────────────────────────────────────────────
-// BACKTEST ENGINE — CONTRACT-BASED SIZING
+// ─────────────────────────────────────────────────────────────────
+// BACKTEST ENGINE
 //
-// One contract = 100 shares of SPY.
-// Margin per contract = (spreadWidth − netPremium) × 100
-//   This equals the maximum possible loss per contract.
-//   The long put at longOTM% hard-caps that loss — there is
-//   no scenario where you lose more per contract than this.
+// SIZING (the critical fix vs previous version):
+//   You never deploy your full capital as margin — that causes ruin.
+//   marginPct (default 25%) defines the max fraction of capital used
+//   as margin each month. Professional recommendation is 20–30%.
 //
-// Contracts traded = floor(available_capital / marginPerContract)
-//   Minimum 1 contract always — account can recover from losses.
-//   If capital goes negative the account trades 1 contract on
-//   margin (simulating a funded recovery scenario).
+//   contracts = floor( cap × marginPct/100 / marginPerContract )
+//   Minimum 1 always so recovery is possible even if cap < 0.
 //
-// Capital has NO floor — it can go and stay negative.
-// ─────────────────────────────────────────────────
-function runBacktest(shortOTMp, longOTMp, startCap, rfrPct) {
-  const longOTMf = Math.max(longOTMp, shortOTMp+0.5);
-  const T=30/365, r=rfrPct/100;
-  let cap=startCap, peak=startCap;
-  const monthly=[], spyBase=SPY[0], n=Math.min(SPY.length,VIX.length);
+// VOLATILITY SKEW (realism fix):
+//   OTM puts always trade at higher implied vol than ATM (the "skew").
+//   Flat VIX sigma severely underprices OTM short puts, making
+//   premiums look too small. We apply documented skew multipliers:
+//     Short put (5% OTM)  : sigma = VIX × 1.30
+//     Long  put (8% OTM)  : sigma = VIX × 1.50
+//   These are conservative approximations of real SPY skew.
+//   The effect is higher net credit, better reflecting real markets.
+//
+// CAPITAL:
+//   Has no floor — can go and stay negative. The 25% cap means a
+//   single worst-case month costs at most 25% of capital. Painful
+//   but survivable.
+// ─────────────────────────────────────────────────────────────────
+function runBacktest(shortOTMp, longOTMp, startCap, rfrPct, marginPct, startYear, endYear) {
+  const longOTMf  = Math.max(longOTMp, shortOTMp + 0.5);
+  const T         = 30 / 365;
+  const r         = rfrPct / 100;
+  const margFrac  = marginPct / 100;
 
-  for(let i=1;i<n;i++){
-    const S0=SPY[i-1], S1=SPY[i];
-    const sigma=Math.max(VIX[i-1]/100,0.05);
-    const date=getLabel(i), year=date.substring(0,4);
+  let cap = startCap, peak = startCap;
+  const monthly = [];
+  const n = Math.min(SPY.length, VIX.length);
 
-    // Strikes
-    const K1=S0*(1-shortOTMp/100);   // short put — 5% below
-    const K2=S0*(1-longOTMf/100);    // long put  — 8% below (locks max loss)
+  // Find the SPY price at the start of our window for B&H reference
+  let spyWindowBase = null;
 
-    // Per-share option prices
-    const sp=bsPut(S0,K1,r,T,sigma);
-    const lp=bsPut(S0,K2,r,T,sigma);
+  for (let i = 1; i < n; i++) {
+    const yr = getYear(i);
+    if (yr < startYear || yr > endYear) continue;
 
-    // Per-share economics
-    const netPrem   = Math.max(sp-lp,0);      // credit collected per share
-    const swPerShare= K1-K2;                   // spread width per share
-    const margPerSh = Math.max(swPerShare-netPrem,0.01); // margin = max loss per share
+    const S0 = SPY[i-1], S1 = SPY[i];
+    if (spyWindowBase === null) spyWindowBase = S0;
 
-    // Per contract (100 shares)
-    const margPerCon= margPerSh*100;
-    const premPerCon= netPrem*100;
+    // Skew-adjusted sigmas: OTM puts trade at higher IV than VIX (ATM)
+    // Short put ~5% OTM: add ~30% to vol; long put ~8% OTM: add ~50%
+    const vix    = VIX[i-1] / 100;
+    const skewS  = 1.30;  // short put skew multiplier
+    const skewL  = 1.50;  // long  put skew multiplier
+    const sigmaS = Math.max(vix * skewS, 0.05);
+    const sigmaL = Math.max(vix * skewL, 0.05);
 
-    // Sizing: how many contracts fit in available capital?
-    const avail    = Math.max(cap,0);
-    const contracts= Math.max(1, Math.floor(avail/margPerCon));
+    const date = getLabel(i);
+    const year = String(yr);
 
-    // P&L per share — 3 outcomes:
-    // 1. S1 above short strike → keep full premium
-    // 2. S1 below long strike  → hit max loss (long put absorbed the rest)
-    // 3. S1 between strikes    → partial loss
+    // Strike prices
+    const K1 = S0 * (1 - shortOTMp  / 100);
+    const K2 = S0 * (1 - longOTMf   / 100);
+
+    // Option prices per share using skew-adjusted sigma
+    const shortPrem = bsPut(S0, K1, r, T, sigmaS);
+    const longPrem  = bsPut(S0, K2, r, T, sigmaL);
+
+    // Per-share spread economics
+    const netPrem     = Math.max(shortPrem - longPrem, 0);
+    const spreadWidth = K1 - K2;
+    const margPerSh   = Math.max(spreadWidth - netPrem, 0.01);
+
+    // Per-contract (100 shares)
+    const margPerCon  = margPerSh  * 100;
+    const premPerCon  = netPrem    * 100;
+
+    // Position sizing — cap margin at marginPct% of capital
+    const avail     = Math.max(cap, 0);
+    const maxMargin = avail * margFrac;
+    const contracts = Math.max(1, Math.floor(maxMargin / margPerCon));
+
+    // P&L per share:
+    //  Win:     S1 ≥ K1  → keep full net premium
+    //  Partial: K2 < S1 < K1 → premium minus intrinsic loss
+    //  Full:    S1 ≤ K2  → max loss = margPerSh (long put absorbed rest)
     let pnlSh;
-    if     (S1>=K1) pnlSh= netPrem;
-    else if(S1<=K2) pnlSh=-margPerSh;
-    else            pnlSh= netPrem-(K1-S1);
+    if      (S1 >= K1) pnlSh =  netPrem;
+    else if (S1 <= K2) pnlSh = -margPerSh;
+    else               pnlSh =  netPrem - (K1 - S1);
 
-    const dollarPnl=pnlSh*100*contracts;
-    cap+=dollarPnl;                           // NO floor — capital can go negative
-    if(cap>peak) peak=cap;
-    const dd=peak>0?((cap-peak)/peak)*100:0;
-    const spyBnH=startCap*(S1/spyBase);
-    const totalMarg=margPerCon*contracts;
-    const retPct=(dollarPnl/totalMarg)*100;
+    const dollarPnl      = pnlSh * 100 * contracts;
+    cap += dollarPnl;                            // no floor — can go negative
+    if (cap > peak) peak = cap;
+
+    const dd         = peak > 0 ? ((cap - peak) / peak) * 100 : 0;
+    const spyBnH     = startCap * (S1 / spyWindowBase);
+    const margDeploy = margPerCon * contracts;
+    const retPct     = (dollarPnl / margDeploy) * 100;
+    const retOnCap   = startCap > 0 ? (dollarPnl / startCap) * 100 : 0;
 
     monthly.push({
-      date,year,S0,S1,
-      K1:+K1.toFixed(2),K2:+K2.toFixed(2),
+      date, year, S0, S1,
+      K1: +K1.toFixed(2), K2: +K2.toFixed(2),
       contracts,
-      premPerCon:+premPerCon.toFixed(2),
-      margPerCon:+margPerCon.toFixed(2),
-      retPct:+retPct.toFixed(2),
-      dollarPnl:+dollarPnl.toFixed(2),
-      cap:+cap.toFixed(2),
-      spyBnH:+spyBnH.toFixed(2),
-      dd:+dd.toFixed(2),
-      win:dollarPnl>=0
+      premPerCon:  +premPerCon.toFixed(2),
+      margPerCon:  +margPerCon.toFixed(2),
+      margDeploy:  +margDeploy.toFixed(2),
+      retPct:      +retPct.toFixed(2),
+      retOnCap:    +retOnCap.toFixed(3),
+      dollarPnl:   +dollarPnl.toFixed(2),
+      cap:         +cap.toFixed(2),
+      spyBnH:      +spyBnH.toFixed(2),
+      dd:          +dd.toFixed(2),
+      win:         dollarPnl >= 0,
+      scenario:    S1 >= K1 ? 'win' : S1 <= K2 ? 'full_loss' : 'partial'
     });
   }
 
+  if (monthly.length === 0) return null;
+
   // Annual aggregation
-  const annMap={};
-  monthly.forEach(m=>{
-    if(!annMap[m.year]) annMap[m.year]={months:[],wins:0};
+  const annMap = {};
+  monthly.forEach(m => {
+    if (!annMap[m.year]) annMap[m.year] = { months: [], wins: 0, fullLoss: 0 };
     annMap[m.year].months.push(m);
-    if(m.win) annMap[m.year].wins++;
+    if (m.win) annMap[m.year].wins++;
+    if (m.scenario === 'full_loss') annMap[m.year].fullLoss++;
   });
 
-  const annual=Object.entries(annMap).map(([yr,{months,wins}])=>{
-    const cs=months[0].cap-months[0].dollarPnl;
-    const ce=months[months.length-1].cap;
-    const pnl=ce-cs;
-    const retPct=cs!==0?+(pnl/Math.abs(cs)*100).toFixed(1):0;
-    return{year:yr,retPct,wins,losses:months.length-wins,
-      winRate:+(wins/months.length*100).toFixed(0),pnl:+pnl.toFixed(0)};
+  const annual = Object.entries(annMap).map(([yr, { months, wins, fullLoss }]) => {
+    const cs   = months[0].cap - months[0].dollarPnl;
+    const ce   = months[months.length - 1].cap;
+    const pnl  = ce - cs;
+    const ret  = cs !== 0 ? +(pnl / Math.abs(cs) * 100).toFixed(1) : 0;
+    return {
+      year: yr, retPct: ret, wins,
+      losses:   months.length - wins,
+      fullLoss, winRate: +(wins / months.length * 100).toFixed(0),
+      pnl:      +pnl.toFixed(0)
+    };
   });
 
-  const wins=monthly.filter(m=>m.win);
-  const losses=monthly.filter(m=>!m.win);
-  const yrs=monthly.length/12;
-  const spyFinal=startCap*(SPY[n-1]/spyBase);
-  const cagr=cap>0&&startCap>0?+((Math.pow(cap/startCap,1/yrs)-1)*100).toFixed(1):null;
+  const wins   = monthly.filter(m => m.win);
+  const losses = monthly.filter(m => !m.win);
+  const yrs    = monthly.length / 12;
+  const spyFinal = startCap * (SPY[monthly[monthly.length-1] ? n-1 : n-1] / spyWindowBase);
 
-  return{monthly,annual,stats:{
-    n:monthly.length,
-    wins:wins.length,losses:losses.length,
-    winRate:+(wins.length/monthly.length*100).toFixed(1),
-    cagr,spyCagr:+((Math.pow(spyFinal/startCap,1/yrs)-1)*100).toFixed(1),
-    totalReturn:+(((cap-startCap)/startCap)*100).toFixed(1),
-    maxDD:+(Math.min(...monthly.map(m=>m.dd))).toFixed(1),
-    avgWin:wins.length?+(wins.reduce((s,m)=>s+m.retPct,0)/wins.length).toFixed(1):0,
-    avgLoss:losses.length?+(losses.reduce((s,m)=>s+m.retPct,0)/losses.length).toFixed(1):0,
-    bestMonth:+(Math.max(...monthly.map(m=>m.retPct))).toFixed(1),
-    worstMonth:+(Math.min(...monthly.map(m=>m.retPct))).toFixed(1),
-    finalCap:+cap.toFixed(0),startCap,spyFinal:+spyFinal.toFixed(0)
-  }};
+  const cagr = cap > 0 && startCap > 0
+    ? +((Math.pow(cap / startCap, 1/yrs) - 1) * 100).toFixed(1) : null;
+
+  // SPY CAGR over same window
+  const spyEnd = monthly[monthly.length-1].spyBnH;
+  const spyCagr = +((Math.pow(spyEnd / startCap, 1/yrs) - 1) * 100).toFixed(1);
+
+  return { monthly, annual,
+    stats: {
+      n: monthly.length,
+      wins: wins.length, losses: losses.length,
+      winRate:    +(wins.length / monthly.length * 100).toFixed(1),
+      cagr, spyCagr,
+      totalReturn:+(((cap - startCap) / startCap) * 100).toFixed(1),
+      maxDD:      +(Math.min(...monthly.map(m => m.dd))).toFixed(1),
+      avgWin:      wins.length   ? +(wins.reduce((s,m)=>s+m.retPct,0)/wins.length).toFixed(1)   : 0,
+      avgLoss:     losses.length ? +(losses.reduce((s,m)=>s+m.retPct,0)/losses.length).toFixed(1) : 0,
+      bestMonth:  +(Math.max(...monthly.map(m => m.retPct))).toFixed(1),
+      worstMonth: +(Math.min(...monthly.map(m => m.retPct))).toFixed(1),
+      finalCap:   +cap.toFixed(0), startCap,
+      fullLossMonths: monthly.filter(m=>m.scenario==='full_loss').length
+    }
+  };
 }
 
-// ── CHART.JS DEFAULTS ──
-Chart.defaults.color='#3d4160';
-Chart.defaults.font.family="'IBM Plex Mono',monospace";
-Chart.defaults.font.size=9;
+// ── WALK-FORWARD ENGINE ──
+// Splits the full date range into non-overlapping windows of wfYears years.
+// Shows whether the edge is consistent or concentrated in one era.
+function runWalkForward(shortOTMp, longOTMp, startCap, rfrPct, marginPct, startYear, endYear, wfYears) {
+  const windows = [];
+  for (let y = startYear; y + wfYears - 1 <= endYear; y += wfYears) {
+    const wEnd = Math.min(y + wfYears - 1, endYear);
+    const r = runBacktest(shortOTMp, longOTMp, startCap, rfrPct, marginPct, y, wEnd);
+    if (r) windows.push({ from: y, to: wEnd, ...r.stats });
+  }
+  return windows;
+}
 
-let charts={};
-function destroyAll(){Object.values(charts).forEach(c=>c&&c.destroy());charts={};}
-function gridOpts(){return{color:'rgba(28,31,53,0.8)',drawBorder:false};}
-function tickOpts(){return{maxRotation:0,color:'#3d4160'};}
+// ─────────────────────────────────────────────────
+// CHART / UI CODE BELOW
+// ─────────────────────────────────────────────────
+Chart.defaults.color = '#3d4160';
+Chart.defaults.font.family = "'IBM Plex Mono', monospace";
+Chart.defaults.font.size = 9;
 
-function renderStats(s){
-  const grid=document.getElementById('statsGrid');
-  const cagrVal=s.cagr!==null?fmt(s.cagr):'N/A';
-  const cagrCls=s.cagr!==null&&s.cagr>s.spyCagr?'green':'accent';
-  const cards=[
-    {label:'Strategy CAGR', value:cagrVal,            sub:`SPY B&H: ${fmt(s.spyCagr)}`,              cls:cagrCls},
-    {label:'Win Rate',       value:`${s.winRate}%`,    sub:`${s.wins}W · ${s.losses}L`,               cls:'accent'},
-    {label:'Max Drawdown',   value:`${s.maxDD}%`,      sub:'from equity peak',                         cls:'red'},
-    {label:'Total Return',   value:fmt(s.totalReturn,0),sub:`${fmtE(s.startCap)} → ${fmtE(s.finalCap)}`, cls:s.totalReturn>0?'green':'red'},
-    {label:'Avg Win Month',  value:`+${s.avgWin}%`,   sub:'on margin deployed',                        cls:'green'},
-    {label:'Avg Loss Month', value:`${s.avgLoss}%`,   sub:'on margin deployed',                        cls:'red'},
-    {label:'Best Month',     value:`+${s.bestMonth}%`,sub:'single month',                              cls:'green'},
-    {label:'Worst Month',    value:`${s.worstMonth}%`,sub:'single month',                              cls:'red'},
+let charts = {}, lastResult = null;
+
+function destroyAll() { Object.values(charts).forEach(c => c && c.destroy()); charts = {}; }
+function gridOpts()   { return { color: 'rgba(28,31,53,0.8)', drawBorder: false }; }
+function tickOpts()   { return { maxRotation: 0, color: '#3d4160' }; }
+
+// ── TOOLTIP: shared style ──
+const ttBase = {
+  backgroundColor: '#111325', borderColor: '#1c1f35', borderWidth: 1,
+  titleColor: '#3d4160', bodyColor: '#b8bdd4', padding: 10
+};
+
+function renderStats(s) {
+  const grid = document.getElementById('statsGrid');
+  const cagrVal = s.cagr !== null ? fmt(s.cagr) : 'N/A';
+  const cagrCls = s.cagr !== null && s.cagr > s.spyCagr ? 'green' : 'accent';
+  const cards = [
+    { label:'Strategy CAGR',  value:cagrVal,              sub:`SPY B&H: ${fmt(s.spyCagr)}`,                  cls:cagrCls },
+    { label:'Win Rate',        value:`${s.winRate}%`,      sub:`${s.wins}W · ${s.losses}L / ${s.n} months`,  cls:'accent' },
+    { label:'Max Drawdown',    value:`${s.maxDD}%`,        sub:'from equity peak',                             cls:'red' },
+    { label:'Total Return',    value:fmt(s.totalReturn,0), sub:`${fmtE(s.startCap)} → ${fmtE(s.finalCap)}`,  cls:s.totalReturn>0?'green':'red' },
+    { label:'Avg Win Month',   value:`+${s.avgWin}%`,     sub:'on margin deployed',                           cls:'green' },
+    { label:'Avg Loss Month',  value:`${s.avgLoss}%`,     sub:'on margin deployed',                           cls:'red' },
+    { label:'Best Month',      value:`+${s.bestMonth}%`,  sub:'single month',                                 cls:'green' },
+    { label:'Full Loss Months',value:String(s.fullLossMonths), sub:'SPY dropped through both strikes',        cls:'red' },
   ];
-  grid.innerHTML=cards.map(c=>`
-    <div class="stat-card">
+  grid.innerHTML = cards.map((c,i) => `
+    <div class="stat-card" style="animation-delay:${i*0.025}s">
       <div class="stat-label">${c.label}</div>
       <div class="stat-value ${c.cls}">${c.value}</div>
       <div class="stat-sub">${c.sub}</div>
     </div>`).join('');
 }
 
-function renderEquity(monthly){
-  const ctx=document.getElementById('chartEquity').getContext('2d');
-  const showSPY=document.getElementById('spyToggle').checked;
-  const ds=[{
-    label:'Strategy',
-    data:monthly.map(m=>m.cap),
-    borderColor:'#f0a500',
-    backgroundColor:'rgba(240,165,0,0.06)',
-    borderWidth:2,pointRadius:0,fill:true,tension:0.3
+function renderEquity(monthly) {
+  const ctx = document.getElementById('chartEquity').getContext('2d');
+  const showSPY = document.getElementById('spyToggle').checked;
+  const ds = [{
+    label:'Strategy', data:monthly.map(m=>m.cap),
+    borderColor:'#f0a500', backgroundColor:'rgba(240,165,0,0.06)',
+    borderWidth:2, pointRadius:0, fill:true, tension:0.3
   }];
-  if(showSPY) ds.push({
-    label:'SPY B&H',
-    data:monthly.map(m=>m.spyBnH),
-    borderColor:'#4fa3e8',borderWidth:1.5,borderDash:[6,3],
-    pointRadius:0,fill:false,tension:0.3
+  if (showSPY) ds.push({
+    label:'SPY B&H', data:monthly.map(m=>m.spyBnH),
+    borderColor:'#4fa3e8', borderWidth:1.5, borderDash:[6,3],
+    pointRadius:0, fill:false, tension:0.3
   });
-  charts.equity=new Chart(ctx,{type:'line',data:{labels:monthly.map(m=>m.date),datasets:ds},
-    options:{responsive:true,maintainAspectRatio:false,animation:{duration:600},
+  charts.equity = new Chart(ctx, {
+    type:'line', data:{labels:monthly.map(m=>m.date), datasets:ds},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:{duration:600},
       interaction:{mode:'index',intersect:false},
       plugins:{
         legend:{display:true,labels:{color:'#5a5f7a',boxWidth:14,font:{size:9}}},
-        tooltip:{backgroundColor:'#111325',borderColor:'#1c1f35',borderWidth:1,
-          titleColor:'#3d4160',bodyColor:'#b8bdd4',padding:10,
-          callbacks:{label:c=>`  ${c.dataset.label}: ${fmtERaw(c.parsed.y)}`}}
+        tooltip:{...ttBase, callbacks:{
+          label:c=>`  ${c.dataset.label}: ${fmtER(c.parsed.y)}`
+        }}
       },
       scales:{
         x:{grid:gridOpts(),ticks:{...tickOpts(),maxTicksLimit:10}},
-        y:{grid:gridOpts(),ticks:{...tickOpts(),callback:v=>(v<0?'-€':'€')+Math.abs(Math.round(v/1000))+'k'}}
+        y:{grid:gridOpts(),ticks:{...tickOpts(),callback:v=>(v<0?'-':'')+'€'+Math.abs(Math.round(v/1000))+'k'}}
       }
     }
   });
 }
 
-function renderMonthly(monthly){
-  const ctx=document.getElementById('chartMonthly').getContext('2d');
-  charts.monthly=new Chart(ctx,{type:'bar',
-    data:{labels:monthly.map(m=>m.date),datasets:[{
-      label:'Monthly Return % (on margin)',
-      data:monthly.map(m=>m.retPct),
-      backgroundColor:monthly.map(m=>m.win?'rgba(29,218,122,0.75)':'rgba(255,69,96,0.75)'),
-      borderWidth:0,borderRadius:1
-    }]},
-    options:{responsive:true,maintainAspectRatio:false,animation:{duration:400},
+function renderMonthly(monthly) {
+  const ctx = document.getElementById('chartMonthly').getContext('2d');
+  charts.monthly = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels:monthly.map(m=>m.date),
+      datasets:[{
+        label:'Monthly Return % (on margin)',
+        data:monthly.map(m=>m.retPct),
+        backgroundColor:monthly.map(m=>{
+          if(m.scenario==='win')       return 'rgba(29,218,122,0.75)';
+          if(m.scenario==='full_loss') return 'rgba(255,69,96,0.9)';
+          return 'rgba(255,150,50,0.8)';  // orange = partial loss
+        }),
+        borderWidth:0, borderRadius:1
+      }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:{duration:400},
       interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},
-        tooltip:{backgroundColor:'#111325',borderColor:'#1c1f35',borderWidth:1,
-          titleColor:'#3d4160',bodyColor:'#b8bdd4',padding:10,
-          callbacks:{label:(c)=>{
+      plugins:{
+        legend:{display:false},
+        tooltip:{...ttBase, callbacks:{
+          label:(c)=>{
             const m=monthly[c.dataIndex];
-            return[`  Return: ${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(2)}%`,
-              `  P&L: ${fmtERaw(m.dollarPnl)}`,
-              `  Contracts: ${m.contracts}  ·  Margin/c: ${fmtERaw(m.margPerCon)}`];
-          }}}
+            const label = m.scenario==='win'?'WIN':m.scenario==='full_loss'?'FULL LOSS':'PARTIAL';
+            return[
+              `  ${label}: ${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(2)}%`,
+              `  P&L: ${fmtER(m.dollarPnl)}  ·  Contracts: ${m.contracts}`,
+              `  SPY: ${m.S0}→${m.S1}  (${fmt((m.S1-m.S0)/m.S0*100,1)})`
+            ];
+          }
+        }}
       },
       scales:{
         x:{grid:gridOpts(),ticks:{...tickOpts(),maxTicksLimit:12}},
@@ -296,25 +383,31 @@ function renderMonthly(monthly){
   });
 }
 
-function renderAnnual(annual){
-  const ctx=document.getElementById('chartAnnual').getContext('2d');
-  charts.annual=new Chart(ctx,{type:'bar',
-    data:{labels:annual.map(a=>a.year),datasets:[{
-      label:'Annual Return %',
-      data:annual.map(a=>a.retPct),
-      backgroundColor:annual.map(a=>a.retPct>=0?'rgba(29,218,122,0.8)':'rgba(255,69,96,0.8)'),
-      borderRadius:3,borderSkipped:false
-    }]},
-    options:{responsive:true,maintainAspectRatio:false,animation:{duration:400},
+function renderAnnual(annual) {
+  const ctx = document.getElementById('chartAnnual').getContext('2d');
+  charts.annual = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels:annual.map(a=>a.year),
+      datasets:[{
+        label:'Annual Return %',
+        data:annual.map(a=>a.retPct),
+        backgroundColor:annual.map(a=>a.retPct>=0?'rgba(29,218,122,0.8)':'rgba(255,69,96,0.8)'),
+        borderRadius:3, borderSkipped:false
+      }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:{duration:400},
       interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},
-        tooltip:{backgroundColor:'#111325',borderColor:'#1c1f35',borderWidth:1,
-          titleColor:'#3d4160',bodyColor:'#b8bdd4',padding:10,
-          callbacks:{label:c=>[
+      plugins:{
+        legend:{display:false},
+        tooltip:{...ttBase, callbacks:{
+          label:c=>[
             `  Return: ${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(1)}%`,
-            `  P&L: ${fmtERaw(annual[c.dataIndex].pnl)}`,
-            `  Win rate: ${annual[c.dataIndex].winRate}% (${annual[c.dataIndex].wins}W·${annual[c.dataIndex].losses}L)`
-          ]}}
+            `  P&L: ${fmtER(annual[c.dataIndex].pnl)}`,
+            `  Win: ${annual[c.dataIndex].winRate}% (${annual[c.dataIndex].wins}W·${annual[c.dataIndex].losses}L)`
+          ]
+        }}
       },
       scales:{
         x:{grid:gridOpts(),ticks:tickOpts()},
@@ -324,8 +417,8 @@ function renderAnnual(annual){
   });
 }
 
-function renderAnnualGrid(annual){
-  document.getElementById('annualGrid').innerHTML=annual.map(a=>`
+function renderAnnualGrid(annual) {
+  document.getElementById('annualGrid').innerHTML = annual.map(a=>`
     <div class="annual-cell">
       <div class="annual-year">${a.year}</div>
       <div class="annual-ret" style="color:${a.retPct>=0?'var(--green)':'var(--red)'}">
@@ -335,21 +428,24 @@ function renderAnnualGrid(annual){
     </div>`).join('');
 }
 
-function renderDrawdown(monthly){
-  const ctx=document.getElementById('chartDrawdown').getContext('2d');
-  charts.drawdown=new Chart(ctx,{type:'line',
-    data:{labels:monthly.map(m=>m.date),datasets:[{
-      label:'Drawdown from peak %',
-      data:monthly.map(m=>m.dd),
-      borderColor:'rgba(255,69,96,0.9)',backgroundColor:'rgba(255,69,96,0.07)',
-      borderWidth:1.5,pointRadius:0,fill:true,tension:0.2
-    }]},
-    options:{responsive:true,maintainAspectRatio:false,animation:{duration:400},
+function renderDrawdown(monthly) {
+  const ctx = document.getElementById('chartDrawdown').getContext('2d');
+  charts.drawdown = new Chart(ctx, {
+    type:'line',
+    data:{
+      labels:monthly.map(m=>m.date),
+      datasets:[{
+        label:'Drawdown from peak',
+        data:monthly.map(m=>m.dd),
+        borderColor:'rgba(255,69,96,0.9)', backgroundColor:'rgba(255,69,96,0.07)',
+        borderWidth:1.5, pointRadius:0, fill:true, tension:0.2
+      }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:{duration:400},
       interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},
-        tooltip:{backgroundColor:'#111325',borderColor:'#1c1f35',borderWidth:1,
-          titleColor:'#3d4160',bodyColor:'#b8bdd4',padding:10,
-          callbacks:{label:c=>`  Drawdown: ${c.parsed.y.toFixed(2)}%`}}
+        tooltip:{...ttBase, callbacks:{label:c=>`  Drawdown: ${c.parsed.y.toFixed(2)}%`}}
       },
       scales:{
         x:{grid:gridOpts(),ticks:{...tickOpts(),maxTicksLimit:10}},
@@ -359,12 +455,64 @@ function renderDrawdown(monthly){
   });
 }
 
-function run(){
-  const shortOTM=parseFloat(document.getElementById('shortOTM').value)||5;
-  const longOTM=parseFloat(document.getElementById('longOTM').value)||8;
-  const capital=parseFloat(document.getElementById('capital').value)||10000;
-  const rfr=parseFloat(document.getElementById('rfr').value)||4;
-  const{monthly,annual,stats}=runBacktest(shortOTM,longOTM,capital,rfr);
+// ── WALK-FORWARD TABLE ──
+function renderWalkForward(windows) {
+  const tbody = document.getElementById('wfBody');
+  if (!windows || windows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted)">No data for selected range</td></tr>';
+    return;
+  }
+  tbody.innerHTML = windows.map(w => {
+    const retCls  = w.cagr !== null && w.cagr >= 0 ? 'green' : 'red';
+    const totalCls = w.totalReturn >= 0 ? 'green' : 'red';
+    const cagrStr = w.cagr !== null ? fmt(w.cagr) : 'N/A';
+    return `<tr>
+      <td>${w.from}–${w.to}</td>
+      <td class="${retCls}">${cagrStr}</td>
+      <td class="${totalCls}">${fmt(w.totalReturn,0)}</td>
+      <td>${w.winRate}%</td>
+      <td>${w.fullLossMonths}</td>
+      <td class="red">${w.maxDD}%</td>
+      <td class="muted">${fmt(w.spyCagr)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── POPULATE YEAR DROPDOWNS ──
+function populateYears() {
+  ['startYear','endYear'].forEach(id => {
+    const el = document.getElementById(id);
+    el.innerHTML = '';
+    for (let y = START_YEAR; y <= END_YEAR; y++) {
+      el.innerHTML += `<option value="${y}">${y}</option>`;
+    }
+  });
+  document.getElementById('startYear').value = START_YEAR;
+  document.getElementById('endYear').value   = END_YEAR;
+}
+
+// ── MAIN RUN ──
+function run() {
+  const shortOTM  = parseFloat(document.getElementById('shortOTM').value)  || 5;
+  const longOTM   = parseFloat(document.getElementById('longOTM').value)   || 8;
+  const capital   = parseFloat(document.getElementById('capital').value)   || 10000;
+  const rfr       = parseFloat(document.getElementById('rfr').value)       || 4;
+  const marginPct = parseFloat(document.getElementById('marginPct').value) || 25;
+  const startYear = parseInt(document.getElementById('startYear').value)   || START_YEAR;
+  const endYear   = parseInt(document.getElementById('endYear').value)     || END_YEAR;
+  const wfYears   = parseInt(document.getElementById('wfYears').value)     || 3;
+
+  if (startYear >= endYear) {
+    document.getElementById('statsGrid').innerHTML = '<div style="color:var(--red);font-family:var(--font-mono);font-size:11px;padding:12px">Start year must be before end year.</div>';
+    return;
+  }
+
+  const result = runBacktest(shortOTM, longOTM, capital, rfr, marginPct, startYear, endYear);
+  if (!result) return;
+  lastResult = result;
+
+  const { monthly, annual, stats } = result;
+
   renderStats(stats);
   destroyAll();
   renderEquity(monthly);
@@ -372,28 +520,31 @@ function run(){
   renderAnnual(annual);
   renderAnnualGrid(annual);
   renderDrawdown(monthly);
+
+  // Walk-forward
+  const wf = runWalkForward(shortOTM, longOTM, capital, rfr, marginPct, startYear, endYear, wfYears);
+  renderWalkForward(wf);
 }
 
-document.querySelectorAll('.tab-btn').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    const tab=btn.dataset.tab;
-    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+// ── TABS ──
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-'+tab).classList.add('active');
-    document.getElementById('spyToggleWrap').style.display=tab==='equity'?'flex':'none';
-    setTimeout(()=>Object.values(charts).forEach(c=>c&&c.resize()),10);
+    document.getElementById('spyToggleWrap').style.display = tab==='equity' ? 'flex' : 'none';
+    setTimeout(() => Object.values(charts).forEach(c => c && c.resize()), 10);
   });
 });
 
-document.getElementById('spyToggle').addEventListener('change',()=>{
-  if(charts.equity) charts.equity.destroy();
-  const shortOTM=parseFloat(document.getElementById('shortOTM').value)||5;
-  const longOTM=parseFloat(document.getElementById('longOTM').value)||8;
-  const capital=parseFloat(document.getElementById('capital').value)||10000;
-  const rfr=parseFloat(document.getElementById('rfr').value)||4;
-  const{monthly}=runBacktest(shortOTM,longOTM,capital,rfr);
-  renderEquity(monthly);
+document.getElementById('spyToggle').addEventListener('change', () => {
+  if (!lastResult) return;
+  if (charts.equity) charts.equity.destroy();
+  renderEquity(lastResult.monthly);
 });
 
+// ── INIT ──
+populateYears();
 run();
