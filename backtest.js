@@ -29,188 +29,203 @@ const SPY = [
 
 // ── DATA: VIX monthly closes 2000–2024 ──
 const VIX = [
-   24, 25, 26, 22, 22, 23, 23, 21, 25, 22, 25, 23,
-   23, 22, 24, 20, 19, 22, 21, 33, 34, 36, 30, 22,
-   21, 22, 22, 22, 24, 27, 31, 38, 37, 34, 28, 28,
-   25, 24, 30, 21, 19, 18, 17, 17, 18, 16, 17, 16,
-   15, 16, 16, 15, 15, 15, 14, 14, 13, 14, 13, 13,
-   13, 12, 12, 13, 12, 12, 12, 12, 14, 15, 12, 11,
-   12, 11, 11, 13, 13, 17, 14, 13, 11, 11, 10, 11,
-   10, 11, 14, 13, 13, 17, 24, 30, 19, 18, 25, 23,
-   22, 24, 25, 20, 17, 22, 22, 22, 30, 55, 50, 40,
-   44, 44, 44, 36, 31, 26, 24, 25, 25, 27, 22, 21,
-   19, 19, 17, 23, 32, 26, 22, 25, 21, 20, 21, 18,
-   18, 18, 17, 15, 15, 16, 18, 32, 33, 29, 27, 23,
-   19, 18, 14, 17, 21, 18, 16, 16, 16, 16, 16, 14,
-   13, 15, 13, 13, 13, 17, 12, 14, 15, 13, 12, 13,
-   14, 14, 14, 14, 12, 11, 12, 12, 15, 16, 13, 14,
-   18, 14, 15, 12, 12, 14, 12, 25, 24, 16, 16, 18,
-   22, 20, 14, 13, 14, 15, 12, 11, 14, 17, 13, 12,
-   11, 12, 11, 10, 10, 11, 10, 10, 10, 10, 11, 11,
-   14, 19, 20, 16, 13, 16, 12, 12, 12, 24, 23, 28,
-   17, 14, 13, 13, 15, 15, 13, 16, 15, 14, 12, 14,
-   18, 40, 53, 31, 27, 30, 23, 23, 26, 29, 24, 22,
-   21, 28, 21, 18, 17, 16, 19, 16, 20, 16, 17, 17,
-   24, 27, 22, 28, 25, 27, 22, 24, 31, 28, 21, 20,
-   19, 18, 19, 15, 15, 14, 14, 16, 17, 18, 13, 13,
-   13, 14, 12, 15, 12, 12, 15, 15, 16, 23, 13, 16
+   24,25,26,22,22,23,23,21,25,22,25,23,
+   23,22,24,20,19,22,21,33,34,36,30,22,
+   21,22,22,22,24,27,31,38,37,34,28,28,
+   25,24,30,21,19,18,17,17,18,16,17,16,
+   15,16,16,15,15,15,14,14,13,14,13,13,
+   13,12,12,13,12,12,12,12,14,15,12,11,
+   12,11,11,13,13,17,14,13,11,11,10,11,
+   10,11,14,13,13,17,24,30,19,18,25,23,
+   22,24,25,20,17,22,22,22,30,55,50,40,
+   44,44,44,36,31,26,24,25,25,27,22,21,
+   19,19,17,23,32,26,22,25,21,20,21,18,
+   18,18,17,15,15,16,18,32,33,29,27,23,
+   19,18,14,17,21,18,16,16,16,16,16,14,
+   13,15,13,13,13,17,12,14,15,13,12,13,
+   14,14,14,14,12,11,12,12,15,16,13,14,
+   18,14,15,12,12,14,12,25,24,16,16,18,
+   22,20,14,13,14,15,12,11,14,17,13,12,
+   11,12,11,10,10,11,10,10,10,10,11,11,
+   14,19,20,16,13,16,12,12,12,24,23,28,
+   17,14,13,13,15,15,13,16,15,14,12,14,
+   18,40,53,31,27,30,23,23,26,29,24,22,
+   21,28,21,18,17,16,19,16,20,16,17,17,
+   24,27,22,28,25,27,22,24,31,28,21,20,
+   19,18,19,15,15,14,14,16,17,18,13,13,
+   13,14,12,15,12,12,15,15,16,23,13,16
 ];
 
 const START_YEAR = 2000;
 
-// ── HELPERS ──
 function getLabel(i) {
   const tot = START_YEAR * 12 + i;
-  const y = Math.floor(tot / 12);
-  const m = (tot % 12) + 1;
-  return `${y}-${String(m).padStart(2, '0')}`;
+  return `${Math.floor(tot/12)}-${String((tot%12)+1).padStart(2,'0')}`;
 }
 
-function fmt(v, d = 1) { return (v >= 0 ? '+' : '') + v.toFixed(d) + '%'; }
-function fmtK(v) { return v >= 10000 ? '€' + (v / 1000).toFixed(1) + 'k' : '€' + v.toFixed(0); }
+function fmt(v, d=1)  { return (v>=0?'+':'')+v.toFixed(d)+'%'; }
+function fmtE(v)      { const abs=Math.abs(v); return (v<0?'-€':'€')+(abs>=10000?(abs/1000).toFixed(1)+'k':abs.toFixed(0)); }
+function fmtERaw(v)   { return (v<0?'-€':'€')+Math.abs(v).toFixed(0); }
 
-// ── MATH: normal CDF (Abramowitz & Stegun) ──
+// Normal CDF (Abramowitz & Stegun)
 function normCDF(x) {
-  const a1=0.254829592, a2=-0.284496736, a3=1.421413741, a4=-1.453152027, a5=1.061405429, p=0.3275911;
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x) / Math.sqrt(2);
-  const t = 1 / (1 + p * ax);
-  const y = 1 - (((((a5*t + a4)*t + a3)*t + a2)*t + a1)*t * Math.exp(-ax * ax));
-  return 0.5 * (1 + sign * y);
+  const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+  const s=x<0?-1:1, ax=Math.abs(x)/Math.sqrt(2);
+  const t=1/(1+p*ax);
+  return 0.5*(1+s*(1-(((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-ax*ax))));
 }
 
-// ── BLACK-SCHOLES PUT PRICE ──
-function bsPut(S, K, r, T, sigma) {
-  if (sigma < 0.01 || T < 0.001 || S <= 0 || K <= 0) return Math.max(K - S, 0);
-  const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / (sigma * Math.sqrt(T));
-  const d2 = d1 - sigma * Math.sqrt(T);
-  return K * Math.exp(-r * T) * normCDF(-d2) - S * normCDF(-d1);
+// Black-Scholes put price
+function bsPut(S,K,r,T,sigma) {
+  if(sigma<0.01||T<0.001||S<=0||K<=0) return Math.max(K-S,0);
+  const d1=(Math.log(S/K)+(r+sigma*sigma/2)*T)/(sigma*Math.sqrt(T));
+  const d2=d1-sigma*Math.sqrt(T);
+  return K*Math.exp(-r*T)*normCDF(-d2)-S*normCDF(-d1);
 }
 
-// ── BACKTEST ENGINE ──
+// ─────────────────────────────────────────────────
+// BACKTEST ENGINE — CONTRACT-BASED SIZING
+//
+// One contract = 100 shares of SPY.
+// Margin per contract = (spreadWidth − netPremium) × 100
+//   This equals the maximum possible loss per contract.
+//   The long put at longOTM% hard-caps that loss — there is
+//   no scenario where you lose more per contract than this.
+//
+// Contracts traded = floor(available_capital / marginPerContract)
+//   Minimum 1 contract always — account can recover from losses.
+//   If capital goes negative the account trades 1 contract on
+//   margin (simulating a funded recovery scenario).
+//
+// Capital has NO floor — it can go and stay negative.
+// ─────────────────────────────────────────────────
 function runBacktest(shortOTMp, longOTMp, startCap, rfrPct) {
-  const longOTMfinal = Math.max(longOTMp, shortOTMp + 0.5);
-  const T = 30 / 365;
-  const r = rfrPct / 100;
-  let cap = startCap;
-  let peak = startCap;
-  const monthly = [];
-  const spyBase = SPY[0];
-  const n = Math.min(SPY.length, VIX.length);
+  const longOTMf = Math.max(longOTMp, shortOTMp+0.5);
+  const T=30/365, r=rfrPct/100;
+  let cap=startCap, peak=startCap;
+  const monthly=[], spyBase=SPY[0], n=Math.min(SPY.length,VIX.length);
 
-  for (let i = 1; i < n; i++) {
-    const S0 = SPY[i - 1], S1 = SPY[i];
-    const sigma = Math.max(VIX[i - 1] / 100, 0.05);
-    const date = getLabel(i);
-    const year = date.substring(0, 4);
+  for(let i=1;i<n;i++){
+    const S0=SPY[i-1], S1=SPY[i];
+    const sigma=Math.max(VIX[i-1]/100,0.05);
+    const date=getLabel(i), year=date.substring(0,4);
 
-    const K1 = S0 * (1 - shortOTMp / 100);
-    const K2 = S0 * (1 - longOTMfinal / 100);
-    const shortP = bsPut(S0, K1, r, T, sigma);
-    const longP  = bsPut(S0, K2, r, T, sigma);
-    const net = Math.max(shortP - longP, 0);
-    const spread = K1 - K2;
-    const maxLoss = Math.max(spread - net, 0.001);
+    // Strikes
+    const K1=S0*(1-shortOTMp/100);   // short put — 5% below
+    const K2=S0*(1-longOTMf/100);    // long put  — 8% below (locks max loss)
 
-    let pnl;
-    if      (S1 >= K1) pnl = net;
-    else if (S1 <= K2) pnl = -maxLoss;
-    else               pnl = net - (K1 - S1);
+    // Per-share option prices
+    const sp=bsPut(S0,K1,r,T,sigma);
+    const lp=bsPut(S0,K2,r,T,sigma);
 
-    const retPct    = (pnl / maxLoss) * 100;
-    const dollarPnl = cap * retPct / 100;
-    cap  = Math.max(cap + dollarPnl, 0.01);
-    if (cap > peak) peak = cap;
-    const dd = ((cap - peak) / peak) * 100;
-    const spyBnH = startCap * (S1 / spyBase);
+    // Per-share economics
+    const netPrem   = Math.max(sp-lp,0);      // credit collected per share
+    const swPerShare= K1-K2;                   // spread width per share
+    const margPerSh = Math.max(swPerShare-netPrem,0.01); // margin = max loss per share
+
+    // Per contract (100 shares)
+    const margPerCon= margPerSh*100;
+    const premPerCon= netPrem*100;
+
+    // Sizing: how many contracts fit in available capital?
+    const avail    = Math.max(cap,0);
+    const contracts= Math.max(1, Math.floor(avail/margPerCon));
+
+    // P&L per share — 3 outcomes:
+    // 1. S1 above short strike → keep full premium
+    // 2. S1 below long strike  → hit max loss (long put absorbed the rest)
+    // 3. S1 between strikes    → partial loss
+    let pnlSh;
+    if     (S1>=K1) pnlSh= netPrem;
+    else if(S1<=K2) pnlSh=-margPerSh;
+    else            pnlSh= netPrem-(K1-S1);
+
+    const dollarPnl=pnlSh*100*contracts;
+    cap+=dollarPnl;                           // NO floor — capital can go negative
+    if(cap>peak) peak=cap;
+    const dd=peak>0?((cap-peak)/peak)*100:0;
+    const spyBnH=startCap*(S1/spyBase);
+    const totalMarg=margPerCon*contracts;
+    const retPct=(dollarPnl/totalMarg)*100;
 
     monthly.push({
-      date, year, S0, S1,
-      retPct:    +retPct.toFixed(2),
-      dollarPnl: +dollarPnl.toFixed(2),
-      cap:       +cap.toFixed(2),
-      spyBnH:    +spyBnH.toFixed(2),
-      dd:        +dd.toFixed(2),
-      win:       pnl >= 0
+      date,year,S0,S1,
+      K1:+K1.toFixed(2),K2:+K2.toFixed(2),
+      contracts,
+      premPerCon:+premPerCon.toFixed(2),
+      margPerCon:+margPerCon.toFixed(2),
+      retPct:+retPct.toFixed(2),
+      dollarPnl:+dollarPnl.toFixed(2),
+      cap:+cap.toFixed(2),
+      spyBnH:+spyBnH.toFixed(2),
+      dd:+dd.toFixed(2),
+      win:dollarPnl>=0
     });
   }
 
-  // ── annual aggregation ──
-  const annMap = {};
-  monthly.forEach(m => {
-    if (!annMap[m.year]) annMap[m.year] = { months: [], wins: 0 };
+  // Annual aggregation
+  const annMap={};
+  monthly.forEach(m=>{
+    if(!annMap[m.year]) annMap[m.year]={months:[],wins:0};
     annMap[m.year].months.push(m);
-    if (m.win) annMap[m.year].wins++;
+    if(m.win) annMap[m.year].wins++;
   });
 
-  const annual = Object.entries(annMap).map(([yr, { months, wins }]) => {
-    const sc = months[0].cap - months[0].dollarPnl;
-    const ec = months[months.length - 1].cap;
-    return {
-      year: yr,
-      retPct: +((ec - sc) / sc * 100).toFixed(1),
-      wins,
-      losses:  months.length - wins,
-      winRate: +(wins / months.length * 100).toFixed(0)
-    };
+  const annual=Object.entries(annMap).map(([yr,{months,wins}])=>{
+    const cs=months[0].cap-months[0].dollarPnl;
+    const ce=months[months.length-1].cap;
+    const pnl=ce-cs;
+    const retPct=cs!==0?+(pnl/Math.abs(cs)*100).toFixed(1):0;
+    return{year:yr,retPct,wins,losses:months.length-wins,
+      winRate:+(wins/months.length*100).toFixed(0),pnl:+pnl.toFixed(0)};
   });
 
-  const wins   = monthly.filter(m => m.win);
-  const losses = monthly.filter(m => !m.win);
-  const yrs    = monthly.length / 12;
-  const spyFinal = startCap * (SPY[n - 1] / spyBase);
+  const wins=monthly.filter(m=>m.win);
+  const losses=monthly.filter(m=>!m.win);
+  const yrs=monthly.length/12;
+  const spyFinal=startCap*(SPY[n-1]/spyBase);
+  const cagr=cap>0&&startCap>0?+((Math.pow(cap/startCap,1/yrs)-1)*100).toFixed(1):null;
 
-  return {
-    monthly, annual,
-    stats: {
-      n:           monthly.length,
-      wins:        wins.length,
-      losses:      losses.length,
-      winRate:    +(wins.length / monthly.length * 100).toFixed(1),
-      cagr:       +((Math.pow(cap / startCap, 1 / yrs) - 1) * 100).toFixed(1),
-      spyCagr:    +((Math.pow(spyFinal / startCap, 1 / yrs) - 1) * 100).toFixed(1),
-      totalReturn:+(((cap - startCap) / startCap) * 100).toFixed(1),
-      maxDD:      +(Math.min(...monthly.map(m => m.dd))).toFixed(1),
-      avgWin:      wins.length   ? +(wins.reduce((s, m) => s + m.retPct, 0) / wins.length).toFixed(1)   : 0,
-      avgLoss:     losses.length ? +(losses.reduce((s, m) => s + m.retPct, 0) / losses.length).toFixed(1) : 0,
-      bestMonth:  +(Math.max(...monthly.map(m => m.retPct))).toFixed(1),
-      worstMonth: +(Math.min(...monthly.map(m => m.retPct))).toFixed(1),
-      finalCap:   +cap.toFixed(0),
-      startCap,
-      spyFinal:   +spyFinal.toFixed(0)
-    }
-  };
+  return{monthly,annual,stats:{
+    n:monthly.length,
+    wins:wins.length,losses:losses.length,
+    winRate:+(wins.length/monthly.length*100).toFixed(1),
+    cagr,spyCagr:+((Math.pow(spyFinal/startCap,1/yrs)-1)*100).toFixed(1),
+    totalReturn:+(((cap-startCap)/startCap)*100).toFixed(1),
+    maxDD:+(Math.min(...monthly.map(m=>m.dd))).toFixed(1),
+    avgWin:wins.length?+(wins.reduce((s,m)=>s+m.retPct,0)/wins.length).toFixed(1):0,
+    avgLoss:losses.length?+(losses.reduce((s,m)=>s+m.retPct,0)/losses.length).toFixed(1):0,
+    bestMonth:+(Math.max(...monthly.map(m=>m.retPct))).toFixed(1),
+    worstMonth:+(Math.min(...monthly.map(m=>m.retPct))).toFixed(1),
+    finalCap:+cap.toFixed(0),startCap,spyFinal:+spyFinal.toFixed(0)
+  }};
 }
 
 // ── CHART.JS DEFAULTS ──
-Chart.defaults.color = '#3d4160';
-Chart.defaults.font.family = "'IBM Plex Mono', monospace";
-Chart.defaults.font.size = 9;
+Chart.defaults.color='#3d4160';
+Chart.defaults.font.family="'IBM Plex Mono',monospace";
+Chart.defaults.font.size=9;
 
-let charts = {};
+let charts={};
+function destroyAll(){Object.values(charts).forEach(c=>c&&c.destroy());charts={};}
+function gridOpts(){return{color:'rgba(28,31,53,0.8)',drawBorder:false};}
+function tickOpts(){return{maxRotation:0,color:'#3d4160'};}
 
-function destroyAll() {
-  Object.values(charts).forEach(c => c && c.destroy());
-  charts = {};
-}
-
-function gridOpts() { return { color: 'rgba(28,31,53,0.8)', drawBorder: false }; }
-function tickOpts() { return { maxRotation: 0, color: '#3d4160' }; }
-
-// ── RENDER STATS ──
-function renderStats(s) {
-  const grid = document.getElementById('statsGrid');
-  const cards = [
-    { label: 'Strategy CAGR',  value: fmt(s.cagr),                sub: `SPY B&H: ${fmt(s.spyCagr)}`,             cls: s.cagr > s.spyCagr ? 'green' : 'accent' },
-    { label: 'Win Rate',        value: `${s.winRate}%`,            sub: `${s.wins}W · ${s.losses}L`,              cls: 'accent' },
-    { label: 'Max Drawdown',    value: `${s.maxDD}%`,              sub: 'from peak',                               cls: 'red' },
-    { label: 'Total Return',    value: fmt(s.totalReturn, 0),      sub: `${fmtK(s.startCap)} → ${fmtK(s.finalCap)}`, cls: s.totalReturn > 0 ? 'green' : 'red' },
-    { label: 'Avg Win Month',   value: `+${s.avgWin}%`,           sub: 'when profitable',                         cls: 'green' },
-    { label: 'Avg Loss Month',  value: `${s.avgLoss}%`,           sub: 'when losing',                             cls: 'red' },
-    { label: 'Best Month',      value: `+${s.bestMonth}%`,        sub: 'single month',                            cls: 'green' },
-    { label: 'Worst Month',     value: `${s.worstMonth}%`,        sub: 'single month',                            cls: 'red' },
+function renderStats(s){
+  const grid=document.getElementById('statsGrid');
+  const cagrVal=s.cagr!==null?fmt(s.cagr):'N/A';
+  const cagrCls=s.cagr!==null&&s.cagr>s.spyCagr?'green':'accent';
+  const cards=[
+    {label:'Strategy CAGR', value:cagrVal,            sub:`SPY B&H: ${fmt(s.spyCagr)}`,              cls:cagrCls},
+    {label:'Win Rate',       value:`${s.winRate}%`,    sub:`${s.wins}W · ${s.losses}L`,               cls:'accent'},
+    {label:'Max Drawdown',   value:`${s.maxDD}%`,      sub:'from equity peak',                         cls:'red'},
+    {label:'Total Return',   value:fmt(s.totalReturn,0),sub:`${fmtE(s.startCap)} → ${fmtE(s.finalCap)}`, cls:s.totalReturn>0?'green':'red'},
+    {label:'Avg Win Month',  value:`+${s.avgWin}%`,   sub:'on margin deployed',                        cls:'green'},
+    {label:'Avg Loss Month', value:`${s.avgLoss}%`,   sub:'on margin deployed',                        cls:'red'},
+    {label:'Best Month',     value:`+${s.bestMonth}%`,sub:'single month',                              cls:'green'},
+    {label:'Worst Month',    value:`${s.worstMonth}%`,sub:'single month',                              cls:'red'},
   ];
-  grid.innerHTML = cards.map(c => `
+  grid.innerHTML=cards.map(c=>`
     <div class="stat-card">
       <div class="stat-label">${c.label}</div>
       <div class="stat-value ${c.cls}">${c.value}</div>
@@ -218,178 +233,138 @@ function renderStats(s) {
     </div>`).join('');
 }
 
-// ── RENDER CHARTS ──
-function renderEquity(monthly) {
-  const ctx = document.getElementById('chartEquity').getContext('2d');
-  const showSPY = document.getElementById('spyToggle').checked;
-  const datasets = [{
-    label: 'Strategy',
-    data: monthly.map(m => m.cap),
-    borderColor: '#f0a500',
-    backgroundColor: 'rgba(240,165,0,0.04)',
-    borderWidth: 2,
-    pointRadius: 0,
-    fill: true,
-    tension: 0.3
+function renderEquity(monthly){
+  const ctx=document.getElementById('chartEquity').getContext('2d');
+  const showSPY=document.getElementById('spyToggle').checked;
+  const ds=[{
+    label:'Strategy',
+    data:monthly.map(m=>m.cap),
+    borderColor:'#f0a500',
+    backgroundColor:'rgba(240,165,0,0.06)',
+    borderWidth:2,pointRadius:0,fill:true,tension:0.3
   }];
-  if (showSPY) datasets.push({
-    label: 'SPY B&H',
-    data: monthly.map(m => m.spyBnH),
-    borderColor: '#4fa3e8',
-    borderWidth: 1.5,
-    borderDash: [6, 3],
-    pointRadius: 0,
-    fill: false,
-    tension: 0.3
+  if(showSPY) ds.push({
+    label:'SPY B&H',
+    data:monthly.map(m=>m.spyBnH),
+    borderColor:'#4fa3e8',borderWidth:1.5,borderDash:[6,3],
+    pointRadius:0,fill:false,tension:0.3
   });
-  charts.equity = new Chart(ctx, {
-    type: 'line',
-    data: { labels: monthly.map(m => m.date), datasets },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: { duration: 600 },
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: true, labels: { color: '#5a5f7a', boxWidth: 14, font: { size: 9 } } },
-        tooltip: {
-          backgroundColor: '#111325', borderColor: '#1c1f35', borderWidth: 1,
-          titleColor: '#3d4160', bodyColor: '#b8bdd4', padding: 10,
-          callbacks: { label: c => `  ${c.dataset.label}: €${Math.round(c.parsed.y).toLocaleString()}` }
-        }
+  charts.equity=new Chart(ctx,{type:'line',data:{labels:monthly.map(m=>m.date),datasets:ds},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:600},
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:true,labels:{color:'#5a5f7a',boxWidth:14,font:{size:9}}},
+        tooltip:{backgroundColor:'#111325',borderColor:'#1c1f35',borderWidth:1,
+          titleColor:'#3d4160',bodyColor:'#b8bdd4',padding:10,
+          callbacks:{label:c=>`  ${c.dataset.label}: ${fmtERaw(c.parsed.y)}`}}
       },
-      scales: {
-        x: { grid: gridOpts(), ticks: { ...tickOpts(), maxTicksLimit: 12 } },
-        y: { grid: gridOpts(), ticks: { ...tickOpts(), callback: v => '€' + Math.round(v / 1000) + 'k' } }
+      scales:{
+        x:{grid:gridOpts(),ticks:{...tickOpts(),maxTicksLimit:10}},
+        y:{grid:gridOpts(),ticks:{...tickOpts(),callback:v=>(v<0?'-€':'€')+Math.abs(Math.round(v/1000))+'k'}}
       }
     }
   });
 }
 
-function renderMonthly(monthly) {
-  const ctx = document.getElementById('chartMonthly').getContext('2d');
-  charts.monthly = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: monthly.map(m => m.date),
-      datasets: [{
-        label: 'Monthly Return %',
-        data: monthly.map(m => m.retPct),
-        backgroundColor: monthly.map(m => m.win ? 'rgba(29,218,122,0.75)' : 'rgba(255,69,96,0.75)'),
-        borderWidth: 0,
-        borderRadius: 1
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#111325', borderColor: '#1c1f35', borderWidth: 1,
-          titleColor: '#3d4160', bodyColor: '#b8bdd4', padding: 10,
-          callbacks: { label: c => `  ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(2)}%` }
-        }
+function renderMonthly(monthly){
+  const ctx=document.getElementById('chartMonthly').getContext('2d');
+  charts.monthly=new Chart(ctx,{type:'bar',
+    data:{labels:monthly.map(m=>m.date),datasets:[{
+      label:'Monthly Return % (on margin)',
+      data:monthly.map(m=>m.retPct),
+      backgroundColor:monthly.map(m=>m.win?'rgba(29,218,122,0.75)':'rgba(255,69,96,0.75)'),
+      borderWidth:0,borderRadius:1
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:400},
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},
+        tooltip:{backgroundColor:'#111325',borderColor:'#1c1f35',borderWidth:1,
+          titleColor:'#3d4160',bodyColor:'#b8bdd4',padding:10,
+          callbacks:{label:(c)=>{
+            const m=monthly[c.dataIndex];
+            return[`  Return: ${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(2)}%`,
+              `  P&L: ${fmtERaw(m.dollarPnl)}`,
+              `  Contracts: ${m.contracts}  ·  Margin/c: ${fmtERaw(m.margPerCon)}`];
+          }}}
       },
-      scales: {
-        x: { grid: gridOpts(), ticks: { ...tickOpts(), maxTicksLimit: 14 } },
-        y: { grid: gridOpts(), ticks: { ...tickOpts(), callback: v => v + '%' },
-          afterDataLimits: a => { a.max = Math.max(a.max, 5); a.min = Math.min(a.min, -5); } }
+      scales:{
+        x:{grid:gridOpts(),ticks:{...tickOpts(),maxTicksLimit:12}},
+        y:{grid:gridOpts(),ticks:{...tickOpts(),callback:v=>v+'%'},
+          afterDataLimits:a=>{a.max=Math.max(a.max,10);a.min=Math.min(a.min,-110);}}
       }
     }
   });
 }
 
-function renderAnnual(annual) {
-  const ctx = document.getElementById('chartAnnual').getContext('2d');
-  charts.annual = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: annual.map(a => a.year),
-      datasets: [{
-        label: 'Annual Return %',
-        data: annual.map(a => a.retPct),
-        backgroundColor: annual.map(a => a.retPct >= 0 ? 'rgba(29,218,122,0.8)' : 'rgba(255,69,96,0.8)'),
-        borderRadius: 3,
-        borderSkipped: false
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#111325', borderColor: '#1c1f35', borderWidth: 1,
-          titleColor: '#3d4160', bodyColor: '#b8bdd4', padding: 10,
-          callbacks: {
-            label: c => `  Return: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(1)}%`,
-            afterLabel: c => `  Win Rate: ${annual[c.dataIndex].winRate}%  (${annual[c.dataIndex].wins}W · ${annual[c.dataIndex].losses}L)`
-          }
-        }
+function renderAnnual(annual){
+  const ctx=document.getElementById('chartAnnual').getContext('2d');
+  charts.annual=new Chart(ctx,{type:'bar',
+    data:{labels:annual.map(a=>a.year),datasets:[{
+      label:'Annual Return %',
+      data:annual.map(a=>a.retPct),
+      backgroundColor:annual.map(a=>a.retPct>=0?'rgba(29,218,122,0.8)':'rgba(255,69,96,0.8)'),
+      borderRadius:3,borderSkipped:false
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:400},
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},
+        tooltip:{backgroundColor:'#111325',borderColor:'#1c1f35',borderWidth:1,
+          titleColor:'#3d4160',bodyColor:'#b8bdd4',padding:10,
+          callbacks:{label:c=>[
+            `  Return: ${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(1)}%`,
+            `  P&L: ${fmtERaw(annual[c.dataIndex].pnl)}`,
+            `  Win rate: ${annual[c.dataIndex].winRate}% (${annual[c.dataIndex].wins}W·${annual[c.dataIndex].losses}L)`
+          ]}}
       },
-      scales: {
-        x: { grid: gridOpts(), ticks: tickOpts() },
-        y: { grid: gridOpts(), ticks: { ...tickOpts(), callback: v => v + '%' } }
+      scales:{
+        x:{grid:gridOpts(),ticks:tickOpts()},
+        y:{grid:gridOpts(),ticks:{...tickOpts(),callback:v=>v+'%'}}
       }
     }
   });
 }
 
-function renderAnnualGrid(annual) {
-  document.getElementById('annualGrid').innerHTML = annual.map(a => `
+function renderAnnualGrid(annual){
+  document.getElementById('annualGrid').innerHTML=annual.map(a=>`
     <div class="annual-cell">
       <div class="annual-year">${a.year}</div>
-      <div class="annual-ret" style="color:${a.retPct >= 0 ? 'var(--green)' : 'var(--red)'}">
-        ${a.retPct >= 0 ? '+' : ''}${a.retPct}%
+      <div class="annual-ret" style="color:${a.retPct>=0?'var(--green)':'var(--red)'}">
+        ${a.retPct>=0?'+':''}${a.retPct}%
       </div>
       <div class="annual-wr">${a.winRate}% W</div>
     </div>`).join('');
 }
 
-function renderDrawdown(monthly) {
-  const ctx = document.getElementById('chartDrawdown').getContext('2d');
-  charts.drawdown = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: monthly.map(m => m.date),
-      datasets: [{
-        label: 'Drawdown %',
-        data: monthly.map(m => m.dd),
-        borderColor: 'rgba(255,69,96,0.9)',
-        backgroundColor: 'rgba(255,69,96,0.08)',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        fill: true,
-        tension: 0.2
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#111325', borderColor: '#1c1f35', borderWidth: 1,
-          titleColor: '#3d4160', bodyColor: '#b8bdd4', padding: 10,
-          callbacks: { label: c => `  Drawdown: ${c.parsed.y.toFixed(2)}%` }
-        }
+function renderDrawdown(monthly){
+  const ctx=document.getElementById('chartDrawdown').getContext('2d');
+  charts.drawdown=new Chart(ctx,{type:'line',
+    data:{labels:monthly.map(m=>m.date),datasets:[{
+      label:'Drawdown from peak %',
+      data:monthly.map(m=>m.dd),
+      borderColor:'rgba(255,69,96,0.9)',backgroundColor:'rgba(255,69,96,0.07)',
+      borderWidth:1.5,pointRadius:0,fill:true,tension:0.2
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:400},
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},
+        tooltip:{backgroundColor:'#111325',borderColor:'#1c1f35',borderWidth:1,
+          titleColor:'#3d4160',bodyColor:'#b8bdd4',padding:10,
+          callbacks:{label:c=>`  Drawdown: ${c.parsed.y.toFixed(2)}%`}}
       },
-      scales: {
-        x: { grid: gridOpts(), ticks: { ...tickOpts(), maxTicksLimit: 12 } },
-        y: { grid: gridOpts(), ticks: { ...tickOpts(), callback: v => v + '%' } }
+      scales:{
+        x:{grid:gridOpts(),ticks:{...tickOpts(),maxTicksLimit:10}},
+        y:{grid:gridOpts(),ticks:{...tickOpts(),callback:v=>v+'%'}}
       }
     }
   });
 }
 
-// ── MAIN RUN ──
-function run() {
-  const shortOTM = parseFloat(document.getElementById('shortOTM').value) || 5;
-  const longOTM  = parseFloat(document.getElementById('longOTM').value)  || 8;
-  const capital  = parseFloat(document.getElementById('capital').value)  || 10000;
-  const rfr      = parseFloat(document.getElementById('rfr').value)      || 4;
-
-  const { monthly, annual, stats } = runBacktest(shortOTM, longOTM, capital, rfr);
-
+function run(){
+  const shortOTM=parseFloat(document.getElementById('shortOTM').value)||5;
+  const longOTM=parseFloat(document.getElementById('longOTM').value)||8;
+  const capital=parseFloat(document.getElementById('capital').value)||10000;
+  const rfr=parseFloat(document.getElementById('rfr').value)||4;
+  const{monthly,annual,stats}=runBacktest(shortOTM,longOTM,capital,rfr);
   renderStats(stats);
   destroyAll();
   renderEquity(monthly);
@@ -399,29 +374,26 @@ function run() {
   renderDrawdown(monthly);
 }
 
-// ── TABS ──
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const tab = btn.dataset.tab;
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const tab=btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
     btn.classList.add('active');
-    document.getElementById('panel-' + tab).classList.add('active');
-    document.getElementById('spyToggleWrap').style.display = tab === 'equity' ? 'flex' : 'none';
-    setTimeout(() => Object.values(charts).forEach(c => c && c.resize()), 10);
+    document.getElementById('panel-'+tab).classList.add('active');
+    document.getElementById('spyToggleWrap').style.display=tab==='equity'?'flex':'none';
+    setTimeout(()=>Object.values(charts).forEach(c=>c&&c.resize()),10);
   });
 });
 
-// ── SPY TOGGLE ──
-document.getElementById('spyToggle').addEventListener('change', () => {
-  if (charts.equity) charts.equity.destroy();
-  const shortOTM = parseFloat(document.getElementById('shortOTM').value) || 5;
-  const longOTM  = parseFloat(document.getElementById('longOTM').value)  || 8;
-  const capital  = parseFloat(document.getElementById('capital').value)  || 10000;
-  const rfr      = parseFloat(document.getElementById('rfr').value)      || 4;
-  const { monthly } = runBacktest(shortOTM, longOTM, capital, rfr);
+document.getElementById('spyToggle').addEventListener('change',()=>{
+  if(charts.equity) charts.equity.destroy();
+  const shortOTM=parseFloat(document.getElementById('shortOTM').value)||5;
+  const longOTM=parseFloat(document.getElementById('longOTM').value)||8;
+  const capital=parseFloat(document.getElementById('capital').value)||10000;
+  const rfr=parseFloat(document.getElementById('rfr').value)||4;
+  const{monthly}=runBacktest(shortOTM,longOTM,capital,rfr);
   renderEquity(monthly);
 });
 
-// ── INIT ──
 run();
