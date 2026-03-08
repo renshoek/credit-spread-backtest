@@ -16,10 +16,8 @@
   <div class="header">
     <div class="header-left">
       <div class="header-badge">Strategy Engine</div>
-<a href="opus.html" style="display:inline-flex;align-items:center;gap:6px;background:rgba(79,163,232,0.08);border:1px solid rgba(79,163,232,0.2);border-radius:4px;padding:3px 10px;font-family:var(--font-mono);font-size:9px;letter-spacing:2px;color:var(--blue);text-transform:uppercase;text-decoration:none;margin-bottom:10px;">&#8594; Opus model</a>
-
       <div class="header-title">Put Credit Spread<br><span>Backtest Engine</span></div>
-      <div class="header-sub">SPY &middot; 2000&ndash;2024 &middot; Black-Scholes + skew estimate &middot; See accuracy note below</div>
+      <div class="header-sub">SPY &middot; 2000&ndash;2024 &middot; Black-Scholes simulation &middot; NOT real options data</div>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:10px;">
@@ -27,57 +25,68 @@
       <!-- Row 1: core strategy -->
       <div class="controls">
         <div class="ctrl">
-          <div class="ctrl-label" data-tip="Sell put this % below current SPY price. Lower = more premium, higher chance of being tested.">Short OTM %</div>
+          <div class="ctrl-label">Short OTM %</div>
           <input type="number" id="shortOTM" value="5" min="1" max="15" step="0.5">
         </div>
         <div class="ctrl">
-          <div class="ctrl-label" data-tip="Buy protective put this % below current price. Must be > Short OTM. Defines your max loss.">Long OTM %</div>
+          <div class="ctrl-label">Long OTM %</div>
           <input type="number" id="longOTM" value="8" min="2" max="20" step="0.5">
         </div>
-        <div class="ctrl" style="min-width:95px">
-          <div class="ctrl-label" data-tip="Days To Expiration. Tastytrade standard is 45 DTE. More DTE = more premium but more time risk.">DTE (days)</div>
+        <div class="ctrl">
+          <div class="ctrl-label">DTE (days)</div>
           <input type="number" id="dte" value="30" min="7" max="60" step="1">
         </div>
-        <div class="ctrl" style="min-width:95px">
-          <div class="ctrl-label" data-tip="% of capital deployed as margin each month. 25% = worst-case month costs -25% of capital. Never go above 30-35%.">Margin use %</div>
-          <input type="number" id="marginPct" value="25" min="5" max="100" step="5">
-        </div>
-        <div class="ctrl" style="min-width:95px">
-          <div class="ctrl-label" data-tip="Risk-free rate: the return on cash/T-bills. Used in Black-Scholes pricing. At 4% this is ~current US T-bill rate. Has minimal effect on 30-day spreads.">Risk-free %</div>
-          <input type="number" id="rfr" value="4" min="0" max="8" step="0.5">
-        </div>
         <div class="ctrl">
-          <div class="ctrl-label" data-tip="Starting capital in euros. Results (CAGR, %) are identical regardless of amount due to percentage-based sizing.">Capital &euro;</div>
+          <div class="ctrl-label">Capital &euro;</div>
           <input type="number" id="capital" value="10000" min="500" max="500000" step="500">
         </div>
+        <div class="ctrl">
+          <div class="ctrl-label">Margin use %</div>
+          <input type="number" id="marginPct" value="25" min="5" max="100" step="5">
+        </div>
       </div>
 
-      <!-- Row 2: advanced params -->
+      <!-- Row 2: vol / skew / risk params -->
       <div class="controls">
-        <div class="ctrl" style="min-width:95px">
-          <div class="ctrl-label" data-tip="Implied vol multiplier for short put. OTM puts trade above VIX. 5% OTM is typically 1.20–1.40× VIX. Default 1.30.">IV skew: short</div>
+        <div class="ctrl">
+          <div class="ctrl-label">Short skew &times;</div>
           <input type="number" id="skewShort" value="1.30" min="1.00" max="2.00" step="0.05">
         </div>
-        <div class="ctrl" style="min-width:95px">
-          <div class="ctrl-label" data-tip="IV multiplier for long (protective) put. 8% OTM is typically 1.40–1.65× VIX. Default 1.50.">IV skew: long</div>
+        <div class="ctrl">
+          <div class="ctrl-label">Long skew &times;</div>
           <input type="number" id="skewLong" value="1.50" min="1.00" max="2.50" step="0.05">
         </div>
-        <div class="ctrl" style="min-width:95px">
-          <div class="ctrl-label" data-tip="Min VIX to enter trade. Below this, skip month (premium too small). Tastytrade uses 15–16. Set 0 to always trade.">VIX floor</div>
+        <div class="ctrl">
+          <div class="ctrl-label">VIX floor</div>
           <input type="number" id="vixFloor" value="0" min="0" max="40" step="1">
         </div>
-        <div class="ctrl" style="min-width:95px">
-          <div class="ctrl-label" data-tip="Max VIX to enter trade. Above this, skip month (too fearful). Set 999 to always trade. Setting ~35 avoids the worst crash months.">VIX ceiling</div>
+        <div class="ctrl">
+          <div class="ctrl-label">VIX ceiling</div>
           <input type="number" id="vixCeil" value="999" min="10" max="999" step="5">
         </div>
-        <div class="ctrl" style="min-width:110px">
-          <div class="ctrl-label" data-tip="Stop-loss: close trade early if loss reaches X× the premium collected. Tastytrade standard is 2× (200%). Set 0 to hold to expiry always.">Stop-loss &times; prem</div>
+        <div class="ctrl">
+          <div class="ctrl-label">Stop-loss &times; prem</div>
           <input type="number" id="stopLoss" value="0" min="0" max="10" step="0.5">
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-label">Slippage $</div>
+          <input type="number" id="slippage" value="1.50" min="0" max="10" step="0.25">
         </div>
       </div>
 
-      <!-- Row 3: date range + run -->
+      <!-- Row 3: RFR + date range + toggles + run -->
       <div class="controls">
+        <div class="ctrl" style="min-width:100px">
+          <div class="ctrl-label">Risk-free rate</div>
+          <select id="rfrMode">
+            <option value="hist" selected>Historical</option>
+            <option value="fixed">Fixed</option>
+          </select>
+        </div>
+        <div class="ctrl" id="rfrCtrl" style="min-width:80px">
+          <div class="ctrl-label">Fixed RFR %</div>
+          <input type="number" id="rfr" value="4" min="0" max="8" step="0.5">
+        </div>
         <div class="ctrl" style="min-width:90px">
           <div class="ctrl-label">From year</div>
           <select id="startYear"></select>
@@ -87,23 +96,32 @@
           <div class="ctrl-label">To year</div>
           <select id="endYear"></select>
         </div>
+        <label class="intra-toggle">
+          <input type="checkbox" id="intraMonth" checked>
+          <span>Intra-month risk</span>
+        </label>
         <button class="run-btn" onclick="run()">&#9654; Run</button>
       </div>
 
     </div>
   </div>
 
-  <!-- ── ACCURACY WARNING ── -->
-  <div class="accuracy-banner">
-    <span class="accuracy-icon">&#9888;</span>
-    <div>
-      <strong>This is an estimate, not a verified backtest.</strong>
-      Options premiums are calculated via Black-Scholes using end-of-month VIX closes — not real historical bid/ask prices.
-      Intra-month crashes are not captured (SPY can hit -12% mid-month and recover to -5% by close).
-      For verified results: <a href="https://tastytrade.com/research/" target="_blank">Tastytrade Research</a> publishes free historical performance for this exact strategy type.
-      Real options data: <a href="https://optionsdx.com" target="_blank">OptionsDX</a> (~$100/yr).
+  <!-- ── PARAM HELP ── -->
+  <details class="param-help">
+    <summary>Parameter guide &amp; methodology</summary>
+    <div class="param-help-body">
+      <div class="ph-item"><strong>Short OTM %</strong> — How far below current SPY the short put strike is. 5% = sell put at 95% of SPY price. Lower = more premium, higher chance of being tested.</div>
+      <div class="ph-item"><strong>Long OTM %</strong> — How far below current SPY the long put strike is. Must be deeper than short. Defines max loss width (spread width = long - short).</div>
+      <div class="ph-item"><strong>DTE</strong> — Days to expiration. Standard monthly = 30, Tastytrade = 45. More DTE = more premium but more time risk. Note: outcome is still checked at month-end close.</div>
+      <div class="ph-item"><strong>Margin use %</strong> — Fraction of total capital deployed as margin each month. 25% = professional standard. At 25%, a full-loss month costs -25% of capital. Never go above 30–35%.</div>
+      <div class="ph-item"><strong>Short/Long skew &times;</strong> — IV multipliers applied to VIX. OTM puts trade at higher IV than ATM (the "skew"). 1.30/1.50 are estimates for 5%/8% OTM SPY puts. Higher = bigger premiums collected. Real skew varies by market regime.</div>
+      <div class="ph-item"><strong>VIX floor / ceiling</strong> — Only enter trades when VIX is within this range. Floor: skip low-vol months (tiny premiums). Ceiling: skip extreme fear (too risky). Set 0 / 999 to always trade.</div>
+      <div class="ph-item"><strong>Stop-loss &times; prem</strong> — Close early if loss reaches this multiple of premium collected. Tastytrade standard: 2&times;. Set 0 to hold to expiry. In this model, stop is approximated at month-end.</div>
+      <div class="ph-item"><strong>Slippage $</strong> — Per-spread cost deducted from premium. Covers bid-ask spread + commissions. Real value: $1.50–3.00 for SPY. Default $1.50 is conservative.</div>
+      <div class="ph-item"><strong>Risk-free rate</strong> — Used in Black-Scholes pricing. "Historical" uses actual monthly Fed Funds Rate (0.07% in 2014 to 6.5% in 2000). "Fixed" uses your input. Historical is more accurate.</div>
+      <div class="ph-item"><strong>Intra-month risk</strong> — Estimates whether SPY likely dipped below your short strike mid-month using VIX-implied vol (Brownian bridge model). When enabled with a stop-loss, catches cases where the stop would have triggered mid-month even though the month-end close recovered. Without stop-loss, month-end close determines outcome (correct for hold-to-expiry). Breach probability shown in tooltips.</div>
     </div>
-  </div>
+  </details>
 
   <!-- ── STATS ── -->
   <div class="stats-grid" id="statsGrid"></div>
@@ -179,9 +197,25 @@
     </div>
   </div>
 
+  <!-- ── DISCLAIMER ── -->
+  <div class="disclaimer">
+    <strong>&#9888; THIS IS A SIMULATION, NOT A REAL BACKTEST.</strong>
+    Option prices are computed via Black-Scholes using VIX as an IV proxy with static skew multipliers.
+    Real options have actual traded prices, bid-ask spreads, and IV surfaces that differ significantly.
+    A real backtest requires historical options chain data (CBOE OptionMetrics, ~$10k+/yr; OptionsDX ~$100/yr).
+    Premiums may be 10&ndash;30% off from real market prices.
+    <br><br>
+    <strong>&#9888; REMAINING BIASES:</strong>
+    Monthly SPY closes only &mdash; intra-month path is estimated, not observed.
+    DTE affects premium pricing but outcome is always checked at month-end (not actual expiry date).
+    No dividend impact (~1.3%/yr). No term structure. No gamma risk. No early assignment.
+    Skew multipliers are static &mdash; real skew steepens in crashes, flattens in calm.
+    Past performance does not guarantee future results.
+    <a href="https://tastytrade.com/research/" target="_blank">Tastytrade Research</a> publishes free verified performance for this strategy type.
+  </div>
+
 </div>
 
-<!-- data must load before backtest.js -->
 <script src="data.js"></script>
 <script src="backtest.js"></script>
 </body>
