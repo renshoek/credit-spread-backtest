@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Put Credit Spread — Backtest Engine</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="backtest.css">
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── HEADER ── -->
+  <div class="header">
+    <div class="header-left">
+      <div class="header-badge">Strategy Engine</div>
+      <div class="header-title">Put Credit Spread<br><span>Backtest Engine</span></div>
+      <div class="header-sub">SPY &middot; 2000&ndash;2024 &middot; Black-Scholes + volatility skew &middot; Contract-based sizing</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:10px;">
+
+      <!-- Row 1: strategy params -->
+      <div class="controls">
+        <div class="ctrl">
+          <div class="ctrl-label">Short OTM %</div>
+          <input type="number" id="shortOTM" value="5" min="1" max="15" step="0.5">
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-label">Long OTM %</div>
+          <input type="number" id="longOTM" value="8" min="2" max="20" step="0.5">
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-label">Capital &euro;</div>
+          <input type="number" id="capital" value="10000" min="500" max="100000" step="500">
+        </div>
+        <div class="ctrl">
+          <div class="ctrl-label">Risk-free %</div>
+          <input type="number" id="rfr" value="4" min="0" max="8" step="0.5">
+        </div>
+        <div class="ctrl" style="min-width:100px">
+          <div class="ctrl-label">Margin use %</div>
+          <input type="number" id="marginPct" value="25" min="5" max="100" step="5">
+        </div>
+      </div>
+
+      <!-- Row 2: date range + run -->
+      <div class="controls">
+        <div class="ctrl" style="min-width:90px">
+          <div class="ctrl-label">From year</div>
+          <select id="startYear"></select>
+        </div>
+        <div class="ctrl-divider">&rarr;</div>
+        <div class="ctrl" style="min-width:90px">
+          <div class="ctrl-label">To year</div>
+          <select id="endYear"></select>
+        </div>
+        <button class="run-btn" onclick="run()">&#9654; Run</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── STATS ── -->
+  <div class="stats-grid" id="statsGrid"></div>
+
+  <!-- ── TABS ── -->
+  <div class="tabs-row">
+    <button class="tab-btn active" data-tab="equity">Equity Curve</button>
+    <button class="tab-btn" data-tab="monthly">Monthly P&amp;L</button>
+    <button class="tab-btn" data-tab="annual">Annual Returns</button>
+    <button class="tab-btn" data-tab="drawdown">Drawdown</button>
+    <label class="chart-toggle" id="spyToggleWrap">
+      <input type="checkbox" id="spyToggle" checked> SPY B&amp;H
+    </label>
+  </div>
+
+  <!-- ── PANELS ── -->
+  <div class="chart-wrap">
+
+    <div class="tab-panel active" id="panel-equity">
+      <canvas id="chartEquity" height="340"></canvas>
+    </div>
+
+    <div class="tab-panel" id="panel-monthly">
+      <!-- green = win, orange = partial loss, red = full max loss -->
+      <div style="display:flex;gap:14px;margin-bottom:10px;font-family:var(--font-mono);font-size:9px;color:var(--muted2);">
+        <span><span style="color:#1dda7a">&#9646;</span> Win (above short strike)</span>
+        <span><span style="color:rgba(255,150,50,0.9)">&#9646;</span> Partial loss</span>
+        <span><span style="color:#ff4560">&#9646;</span> Full max loss (below long strike)</span>
+      </div>
+      <canvas id="chartMonthly" height="320"></canvas>
+    </div>
+
+    <div class="tab-panel" id="panel-annual">
+      <div class="annual-chart-scroll">
+        <canvas id="chartAnnual" height="260"></canvas>
+      </div>
+      <div class="annual-grid" id="annualGrid"></div>
+    </div>
+
+    <div class="tab-panel" id="panel-drawdown">
+      <canvas id="chartDrawdown" height="340"></canvas>
+    </div>
+
+  </div>
+
+  <!-- ── WALK-FORWARD ── -->
+  <div class="wf-wrap">
+    <div class="section-title">Walk-Forward Analysis</div>
+    <div class="wf-controls">
+      <span class="wf-label">Window size:</span>
+      <select class="wf-select" id="wfYears" onchange="run()">
+        <option value="2">2 years</option>
+        <option value="3" selected>3 years</option>
+        <option value="4">4 years</option>
+        <option value="5">5 years</option>
+      </select>
+      <span style="font-family:var(--font-mono);font-size:9px;color:var(--muted2);margin-left:4px;">
+        &mdash; shows whether the edge is consistent or era-dependent
+      </span>
+    </div>
+    <div class="wf-table-wrap">
+      <table class="wf-table">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th>CAGR</th>
+            <th>Total Return</th>
+            <th>Win Rate</th>
+            <th>Full Loss Months</th>
+            <th>Max DD</th>
+            <th>SPY CAGR</th>
+          </tr>
+        </thead>
+        <tbody id="wfBody">
+          <tr><td colspan="7" style="text-align:center;color:var(--muted)">Press Run to load</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── DISCLAIMER ── -->
+  <div class="disclaimer">
+    <strong>&#9888; MODEL NOTES:</strong>
+    Volatility skew applied: short put (OTM ~5%) priced at VIX &times; 1.30, long put (OTM ~8%) at VIX &times; 1.50 &mdash;
+    reflecting the documented SPY put skew premium. Flat VIX severely underprices OTM puts and distorts results.
+    Margin use % caps how much capital is deployed as margin each month (default 25%). Trading 100% of capital as
+    margin guarantees ruin over time even with positive edge (Kelly criterion violation).
+    Capital has no floor &mdash; can go negative.
+    <br><br>
+    <strong>&#9888; LIMITATIONS:</strong>
+    Premiums are still 10&ndash;20% below real market prices (no bid-ask, no term structure).
+    Excludes IBKR commissions (~&euro;1.30/trade) and Dutch Box 3 tax (36% from 2028).
+    SPY data is monthly closes &mdash; intra-month moves may differ from entry/exit timing.
+    Past performance does not guarantee future results. Paper-trade before real capital.
+  </div>
+
+</div>
+<script src="backtest.js"></script>
+</body>
+</html>
