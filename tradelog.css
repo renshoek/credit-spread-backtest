@@ -84,6 +84,22 @@ body::after {
 }
 .back-link:hover { background:rgba(79,163,232,0.15); }
 
+/* ── DATA SOURCE BADGE ── */
+.data-badge {
+  display:inline-flex; align-items:center; gap:6px;
+  border-radius:4px; padding:3px 10px; margin-top:6px;
+  font-family:var(--font-mono); font-size:9px; letter-spacing:1.5px;
+  text-transform:uppercase; font-weight:600;
+}
+.data-badge.real {
+  background:rgba(29,218,122,0.08); border:1px solid rgba(29,218,122,0.25);
+  color:var(--green);
+}
+.data-badge.sim {
+  background:rgba(90,95,122,0.08); border:1px solid rgba(90,95,122,0.25);
+  color:var(--muted2);
+}
+
 /* ── CONTROLS ── */
 .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:stretch; }
 
@@ -112,11 +128,18 @@ body::after {
 }
 .ctrl select { cursor:pointer; }
 .ctrl input::-webkit-inner-spin-button { opacity:0.3; }
+.ctrl input:disabled { color:var(--muted); cursor:not-allowed; }
 .ctrl-divider {
   align-self:flex-end; padding-bottom:11px;
   font-family:var(--font-mono); font-size:13px;
   color:var(--muted); user-select:none;
 }
+.ctrl.data-source-ctrl {
+  border-color:rgba(79,163,232,0.3);
+  background:rgba(79,163,232,0.04);
+}
+.ctrl.data-source-ctrl .ctrl-label { color:var(--blue); }
+.ctrl.data-source-ctrl select { color:var(--blue); }
 
 .run-btn {
   background:var(--accent); color:#000; border:none;
@@ -139,6 +162,15 @@ body::after {
 }
 .intra-toggle input { accent-color:var(--accent); cursor:pointer; }
 
+.skew-note {
+  display:none; align-items:center; gap:8px;
+  background:rgba(79,163,232,0.06); border:1px solid rgba(79,163,232,0.18);
+  border-radius:8px; padding:7px 12px;
+  font-family:var(--font-mono); font-size:9px; color:var(--blue);
+  letter-spacing:0.3px; align-self:flex-end; white-space:nowrap;
+  line-height:1.4;
+}
+
 /* ── FILTER BAR ── */
 .filter-bar {
   display:flex; gap:8px; align-items:center;
@@ -160,13 +192,6 @@ body::after {
 .filter-btn.f-skipped.active { border-color:var(--muted2); color:var(--muted2); background:rgba(90,95,122,0.07); }
 
 .filter-sep { width:1px; height:20px; background:var(--border); }
-
-.year-jump {
-  margin-left:auto;
-  display:flex; gap:6px; align-items:center;
-  font-family:var(--font-mono); font-size:9px; color:var(--muted2);
-}
-.year-jump span { color:var(--muted); }
 
 .csv-btn {
   background:transparent; border:1px solid var(--border);
@@ -200,7 +225,7 @@ body::after {
 table.tl {
   width:100%; border-collapse:collapse;
   font-family:var(--font-mono); font-size:10px;
-  min-width:1100px;
+  min-width:1200px;
 }
 
 table.tl thead tr {
@@ -220,7 +245,6 @@ table.tl th:hover { color:var(--text); }
 table.tl th.sort-asc::after  { content:' ↑'; color:var(--accent); }
 table.tl th.sort-desc::after { content:' ↓'; color:var(--accent); }
 
-/* ── YEAR GROUP HEADER ── */
 table.tl tr.year-group td {
   padding:6px 10px;
   background:rgba(240,165,0,0.04);
@@ -241,7 +265,6 @@ table.tl td:nth-child(2) { text-align:left; }
 table.tl tr:last-child td { border-bottom:none; }
 table.tl tbody tr:hover td { background:rgba(255,255,255,0.018); }
 
-/* skipped rows: dim everything */
 table.tl tr.row-skipped td { opacity:0.4; }
 table.tl tr.row-skipped td:nth-child(2) { opacity:1; }
 
@@ -270,7 +293,13 @@ table.tl tr.row-skipped td:nth-child(2) { opacity:1; }
 .vix-high { color:var(--orange); }
 .vix-fear { color:var(--red); }
 
-/* ── MINI BARS (SPY move visualization) ── */
+/* ── SKEW HEAT ── */
+.skew-low  { color:var(--muted2); }
+.skew-mid  { color:var(--text); }
+.skew-high { color:var(--accent); }
+.skew-fear { color:var(--red); }
+
+/* ── SPY DELTA BAR ── */
 .spy-move {
   display:inline-flex; align-items:center; gap:5px;
 }

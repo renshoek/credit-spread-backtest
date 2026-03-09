@@ -17,10 +17,22 @@
       <div class="header-badge">Trade Log</div>
       <div class="header-title">Month-by-Month<br><span>Trade Analysis</span></div>
       <div class="header-sub">Every trade decision, strike, premium, outcome &mdash; month by month</div>
+      <div id="dataBadge" class="data-badge sim">&#8635; Loading CBOE data…</div>
       <a href="index.html" class="back-link" style="margin-top:10px;width:fit-content">&#8592; Back to dashboard</a>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:10px;">
+
+      <!-- Row 0: Data source -->
+      <div class="controls">
+        <div class="ctrl data-source-ctrl" style="min-width:160px">
+          <div class="ctrl-label">VIX &amp; Skew source</div>
+          <select id="dataSource">
+            <option value="real" selected>Real — CBOE</option>
+            <option value="sim">Simulated</option>
+          </select>
+        </div>
+      </div>
 
       <!-- Row 1 -->
       <div class="controls">
@@ -47,7 +59,7 @@
       </div>
 
       <!-- Row 2 -->
-      <div class="controls">
+      <div class="controls" id="skewRow">
         <div class="ctrl">
           <div class="ctrl-label">Short skew &times;</div>
           <input type="number" id="skewShort" value="1.30" min="1.00" max="2.00" step="0.05">
@@ -72,6 +84,12 @@
           <div class="ctrl-label">Slippage $</div>
           <input type="number" id="slippage" value="1.50" min="0" max="10" step="0.25">
         </div>
+      </div>
+
+      <!-- Skew note -->
+      <div class="skew-note" id="skewNote">
+        <span>&#9432;</span>
+        <span>Real mode: SKEW-derived per month. Static inputs ignored.</span>
       </div>
 
       <!-- Row 3 -->
@@ -108,17 +126,17 @@
 
   <!-- ── SUMMARY STRIP ── -->
   <div class="summary-strip" id="summaryStrip">
-    <div class="empty-state" style="padding:12px 0;width:100%">Press Run to load</div>
+    <div class="empty-state" style="padding:12px 0;width:100%">Loading CBOE data…</div>
   </div>
 
   <!-- ── FILTER BAR ── -->
   <div class="filter-bar">
-    <button class="filter-btn active" data-filter="all" onclick="setFilter('all',this)">All</button>
-    <button class="filter-btn f-win"     data-filter="win"      onclick="setFilter('win',this)">Win</button>
-    <button class="filter-btn f-partial" data-filter="partial"  onclick="setFilter('partial',this)">Partial</button>
-    <button class="filter-btn f-loss"    data-filter="full_loss" onclick="setFilter('full_loss',this)">Full Loss</button>
-    <button class="filter-btn f-stopped" data-filter="stopped"  onclick="setFilter('stopped',this)">Stopped</button>
-    <button class="filter-btn f-skipped" data-filter="skipped"  onclick="setFilter('skipped',this)">Skipped</button>
+    <button class="filter-btn active" data-filter="all"       onclick="setFilter('all',this)">All</button>
+    <button class="filter-btn f-win"      data-filter="win"       onclick="setFilter('win',this)">Win</button>
+    <button class="filter-btn f-partial"  data-filter="partial"   onclick="setFilter('partial',this)">Partial</button>
+    <button class="filter-btn f-loss"     data-filter="full_loss" onclick="setFilter('full_loss',this)">Full Loss</button>
+    <button class="filter-btn f-stopped"  data-filter="stopped"   onclick="setFilter('stopped',this)">Stopped</button>
+    <button class="filter-btn f-skipped"  data-filter="skipped"   onclick="setFilter('skipped',this)">Skipped</button>
     <div class="filter-sep"></div>
     <span style="font-family:var(--font-mono);font-size:9px;color:var(--muted2)" id="rowCount"></span>
     <button class="csv-btn" onclick="exportCSV()">&#8659; CSV</button>
@@ -130,28 +148,31 @@
       <table class="tl" id="tradeTable">
         <thead>
           <tr>
-            <th onclick="sortBy('date')"    title="Month">Month</th>
-            <th onclick="sortBy('scenario')" title="Outcome">Outcome</th>
-            <th onclick="sortBy('vix')"     title="VIX at entry (previous month close)">VIX</th>
-            <th onclick="sortBy('rfr')"     title="Risk-free rate used in Black-Scholes">RFR %</th>
-            <th onclick="sortBy('S0')"      title="SPY entry price (previous month close)">SPY entry</th>
-            <th onclick="sortBy('S1')"      title="SPY exit price (month close = settlement)">SPY exit</th>
-            <th                             title="SPY month move %">SPY Δ%</th>
-            <th onclick="sortBy('K1')"      title="Short put strike (sold)">K1 short</th>
-            <th onclick="sortBy('K2')"      title="Long put strike (bought — protection)">K2 long</th>
-            <th onclick="sortBy('netPrem')" title="Net premium collected per share after slippage">Prem/sh</th>
-            <th onclick="sortBy('margPerSh')" title="Margin required per share = spread width − premium">Marg/sh</th>
-            <th onclick="sortBy('premiumPct')" title="Net premium as % of margin — your monthly yield if you win">Prem %</th>
-            <th onclick="sortBy('retPct')"  title="Actual return on margin deployed this month">Ret %</th>
-            <th onclick="sortBy('dollarPnl')" title="Actual P&amp;L in euros this month">P&amp;L €</th>
-            <th onclick="sortBy('cap')"     title="Running capital after this month">Capital €</th>
-            <th onclick="sortBy('dd')"      title="Drawdown from equity peak">DD %</th>
-            <th onclick="sortBy('sLow')"    title="Estimated intra-month low (Brownian bridge model)">Est. low</th>
-            <th onclick="sortBy('breachProb')" title="Estimated probability short strike was breached mid-month">Breach %</th>
+            <th onclick="sortBy('date')"          title="Month">Month</th>
+            <th onclick="sortBy('scenario')"      title="Outcome">Outcome</th>
+            <th onclick="sortBy('vix')"           title="VIX close at entry (prior month-end)">VIX</th>
+            <th onclick="sortBy('vixHigh')"       title="Highest VIX daily HIGH during the trade month (real mode only)">VIX peak</th>
+            <th onclick="sortBy('skewVal')"       title="CBOE SKEW index at entry (real mode only)">SKEW</th>
+            <th onclick="sortBy('skewMultShort')" title="Skew multiplier applied to short put IV">Short ×</th>
+            <th onclick="sortBy('rfr')"           title="Risk-free rate used">RFR %</th>
+            <th onclick="sortBy('S0')"            title="SPY entry price">SPY in</th>
+            <th onclick="sortBy('S1')"            title="SPY exit price (month-end settlement)">SPY out</th>
+            <th                                   title="SPY month move %">SPY Δ%</th>
+            <th onclick="sortBy('K1')"            title="Short put strike (sold)">K1 short</th>
+            <th onclick="sortBy('K2')"            title="Long put strike (bought)">K2 long</th>
+            <th onclick="sortBy('netPrem')"       title="Net premium per share after slippage">Prem/sh</th>
+            <th onclick="sortBy('margPerSh')"     title="Margin per share = spread width − premium">Marg/sh</th>
+            <th onclick="sortBy('premiumPct')"    title="Net premium ÷ margin (monthly yield if win)">Prem %</th>
+            <th onclick="sortBy('retPct')"        title="Return on margin deployed">Ret %</th>
+            <th onclick="sortBy('dollarPnl')"     title="P&amp;L in euros this month">P&amp;L €</th>
+            <th onclick="sortBy('cap')"           title="Running capital">Capital €</th>
+            <th onclick="sortBy('dd')"            title="Drawdown from equity peak">DD %</th>
+            <th onclick="sortBy('sLow')"          title="Estimated intra-month SPY low (Brownian bridge)">Est. low</th>
+            <th onclick="sortBy('breachProb')"    title="Estimated probability short strike breached mid-month">Breach %</th>
           </tr>
         </thead>
         <tbody id="tableBody">
-          <tr><td colspan="18" class="empty-state">Press Run to load</td></tr>
+          <tr><td colspan="21" class="empty-state">Loading CBOE data…</td></tr>
         </tbody>
       </table>
     </div>
@@ -164,12 +185,12 @@
 <script>
 // ── TRADE LOG LOGIC ──
 
-let allRows = [];   // full monthly dataset from last run
+let allRows      = [];
 let activeFilter = 'all';
-let sortCol = 'date';
-let sortDir = 1;   // 1 = asc, -1 = desc
+let sortCol      = 'date';
+let sortDir      = 1;
 
-// ── READ URL PARAMS → pre-fill controls ──
+// ── READ URL PARAMS ──
 function loadParamsFromURL() {
   const p = new URLSearchParams(window.location.search);
   const set = (id, key, fallback) => {
@@ -191,12 +212,13 @@ function loadParamsFromURL() {
   set('stopLoss',  'stopLoss',  0);
   set('slippage',  'slippage',  1.50);
   set('rfr',       'rfr',       4);
-  if (p.get('rfrMode')) document.getElementById('rfrMode').value = p.get('rfrMode');
-  if (p.get('intraMonth') === '0') document.getElementById('intraMonth').checked = false;
-  if (p.get('startYear')) document.getElementById('startYear').value = p.get('startYear');
-  if (p.get('endYear'))   document.getElementById('endYear').value   = p.get('endYear');
+  const p2 = new URLSearchParams(window.location.search);
+  if (p2.get('rfrMode'))    document.getElementById('rfrMode').value    = p2.get('rfrMode');
+  if (p2.get('dataSource')) document.getElementById('dataSource').value = p2.get('dataSource');
+  if (p2.get('intraMonth') === '0') document.getElementById('intraMonth').checked = false;
+  if (p2.get('startYear')) document.getElementById('startYear').value = p2.get('startYear');
+  if (p2.get('endYear'))   document.getElementById('endYear').value   = p2.get('endYear');
 
-  // Show/hide fixed RFR
   const rfrCtrl = document.getElementById('rfrCtrl');
   if (rfrCtrl) rfrCtrl.style.display = document.getElementById('rfrMode').value === 'fixed' ? '' : 'none';
 }
@@ -213,11 +235,10 @@ function populateYears() {
   document.getElementById('endYear').value   = DATA_END_YEAR;
 }
 
-// ── COLLECT PARAMS (mirrors backtest.js getParams) ──
+// ── COLLECT PARAMS ──
 function getParams() {
   const g  = id => parseFloat(document.getElementById(id).value);
   const gi = id => parseInt(document.getElementById(id).value);
-  const rfrMode = document.getElementById('rfrMode').value;
   return {
     shortOTMp:    g('shortOTM'),
     longOTMp:     g('longOTM'),
@@ -229,32 +250,37 @@ function getParams() {
     vixCeil:      g('vixCeil'),
     stopLossMult: g('stopLoss'),
     slippage:     g('slippage'),
-    useHistRFR:   rfrMode === 'hist',
+    useHistRFR:   document.getElementById('rfrMode').value === 'hist',
     fixedRFR:     g('rfr'),
     intraMonth:   document.getElementById('intraMonth').checked,
     startYear:    gi('startYear'),
     endYear:      gi('endYear'),
-    startCap:     g('capital')
+    startCap:     g('capital'),
+    dataSource:   document.getElementById('dataSource').value
   };
 }
 
 // ── SUMMARY STRIP ──
 function renderSummary(stats) {
   const s = stats;
+  const isReal = s.dataSource === 'real';
+  const skewStr = isReal && s.avgSKEW
+    ? `SKEW ${s.avgSKEW} avg → ×${s.avgSkewMultShort}`
+    : `skew ×${document.getElementById('skewShort').value}`;
   const items = [
-    { label:'Months',         value: String(s.n),                              cls: '' },
-    { label:'Traded',         value: String(s.traded),                         cls: '' },
-    { label:'Skipped',        value: String(s.skipped),                        cls: s.skipped > 0 ? 'c-muted' : '' },
-    { label:'Win rate',       value: `${s.winRate}%`,                          cls: 'c-accent' },
-    { label:'Wins',           value: String(s.wins),                           cls: 'c-green' },
-    { label:'Losses',         value: String(s.losses),                         cls: s.losses > 0 ? 'c-red' : '' },
-    { label:'Full loss',      value: String(s.fullLossMonths),                 cls: s.fullLossMonths > 0 ? 'c-red' : '' },
-    { label:'Stopped',        value: String(s.stoppedMonths),                  cls: '' },
-    { label:'CAGR',           value: s.cagr !== null ? fmt(s.cagr) : 'N/A',   cls: s.cagr > 0 ? 'c-green' : 'c-red' },
-    { label:'Total return',   value: fmt(s.totalReturn, 0),                    cls: s.totalReturn > 0 ? 'c-green' : 'c-red' },
-    { label:'Max DD',         value: `${s.maxDD}%`,                            cls: 'c-red' },
-    { label:'Avg prem %',     value: `+${s.avgPremPct}%`,                      cls: 'c-green' },
-    { label:'SPY CAGR',       value: fmt(s.spyCagr),                           cls: 'c-blue' },
+    { label:'Months',       value: String(s.n),                            cls: '' },
+    { label:'Traded',       value: String(s.traded),                       cls: '' },
+    { label:'Skipped',      value: String(s.skipped),                      cls: s.skipped > 0 ? 'c-muted' : '' },
+    { label:'Win rate',     value: `${s.winRate}%`,                        cls: 'c-accent' },
+    { label:'Wins',         value: String(s.wins),                         cls: 'c-green' },
+    { label:'Losses',       value: String(s.losses),                       cls: s.losses > 0 ? 'c-red' : '' },
+    { label:'Full loss',    value: String(s.fullLossMonths),               cls: s.fullLossMonths > 0 ? 'c-red' : '' },
+    { label:'Stopped',      value: String(s.stoppedMonths),                cls: '' },
+    { label:'CAGR',         value: s.cagr !== null ? fmt(s.cagr) : 'N/A', cls: s.cagr > 0 ? 'c-green' : 'c-red' },
+    { label:'Total return', value: fmt(s.totalReturn, 0),                  cls: s.totalReturn > 0 ? 'c-green' : 'c-red' },
+    { label:'Max DD',       value: `${s.maxDD}%`,                          cls: 'c-red' },
+    { label:'Skew',         value: skewStr,                                cls: isReal ? 'c-blue' : 'c-muted' },
+    { label:'SPY CAGR',     value: fmt(s.spyCagr),                        cls: 'c-blue' },
   ];
   document.getElementById('summaryStrip').innerHTML = items.map((it, i) => `
     ${i > 0 ? '<div class="ss-sep"></div>' : ''}
@@ -277,7 +303,6 @@ function badge(scenario) {
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
-// ── VIX COLOR ──
 function vixColor(v) {
   if (v < 15) return 'vix-low';
   if (v < 25) return 'vix-mid';
@@ -285,19 +310,22 @@ function vixColor(v) {
   return 'vix-fear';
 }
 
-// ── SPY DELTA CELL ──
+function skewColor(v) {
+  if (!v || v < 120) return 'skew-low';
+  if (v < 135)       return 'skew-mid';
+  if (v < 150)       return 'skew-high';
+  return 'skew-fear';
+}
+
 function spyDelta(s0, s1) {
   const pct = (s1 - s0) / s0 * 100;
-  const abs = Math.min(Math.abs(pct), 15) / 15;  // cap bar at 15%
+  const barW = Math.round(Math.min(Math.abs(pct), 15) / 15 * 40);
   const cls = pct >= 0 ? 'pos' : 'neg';
-  const barW = Math.round(abs * 40);
   return `<div class="spy-move">
     <span class="${pct >= 0 ? 'c-green' : 'c-red'}" style="min-width:44px;text-align:right">
       ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%
     </span>
-    <div class="spy-bar-wrap">
-      <div class="spy-bar ${cls}" style="width:${barW}px"></div>
-    </div>
+    <div class="spy-bar-wrap"><div class="spy-bar ${cls}" style="width:${barW}px"></div></div>
   </div>`;
 }
 
@@ -307,35 +335,40 @@ function buildRows(data) {
   document.getElementById('rowCount').textContent = `${data.length} rows`;
 
   if (data.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="18" class="empty-state">No rows match filter</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="21" class="empty-state">No rows match filter</td></tr>`;
     return;
   }
 
-  let html = '';
-  let lastYear = null;
+  let html = '', lastYear = null;
 
   data.forEach(m => {
-    // Year group header
     if (m.year !== lastYear) {
       lastYear = m.year;
-      html += `<tr class="year-group"><td colspan="18">${m.year}</td></tr>`;
+      html += `<tr class="year-group"><td colspan="21">${m.year}</td></tr>`;
     }
 
     const rowCls = m.scenario === 'skipped' ? 'row-skipped' : '';
-    const spyPct = (m.S1 - m.S0) / m.S0 * 100;
 
-    // Prem/sh, marg/sh, prem% — blank for skipped
-    const premSh   = m.skipped ? '—' : `$${m.netPrem.toFixed(2)}`;
-    const margSh   = m.skipped ? '—' : `$${m.margPerSh.toFixed(2)}`;
-    const premPct  = m.skipped ? '—' : `<span class="c-accent">+${m.premiumPct}%</span>`;
-    const retPct   = m.skipped ? '—'
+    const vixPeakCell   = m.vixHigh
+      ? `<span class="${vixColor(m.vixHigh)}">${m.vixHigh.toFixed(1)}</span>`
+      : '<span class="c-muted">—</span>';
+    const skewCell      = m.skewVal
+      ? `<span class="${skewColor(m.skewVal)}">${m.skewVal.toFixed(1)}</span>`
+      : '<span class="c-muted">—</span>';
+    const skewMultCell  = m.skewMultShort
+      ? `<span class="c-muted">×${m.skewMultShort.toFixed(2)}</span>`
+      : '<span class="c-muted">—</span>';
+    const premSh  = m.skipped ? '—' : `$${m.netPrem.toFixed(2)}`;
+    const margSh  = m.skipped ? '—' : `$${m.margPerSh.toFixed(2)}`;
+    const premPct = m.skipped ? '—' : `<span class="c-accent">+${m.premiumPct}%</span>`;
+    const retPct  = m.skipped ? '—'
       : `<span class="${m.retPct >= 0 ? 'c-green' : 'c-red'}">${m.retPct >= 0 ? '+' : ''}${m.retPct.toFixed(2)}%</span>`;
-    const pnlEur   = m.skipped ? '—'
+    const pnlEur  = m.skipped ? '—'
       : `<span class="${m.dollarPnl >= 0 ? 'c-green' : 'c-red'}">${m.dollarPnl >= 0 ? '+' : ''}€${Math.abs(m.dollarPnl).toFixed(0)}</span>`;
-    const ddCell   = `<span class="${m.dd < -5 ? (m.dd < -15 ? 'c-red' : 'c-orange') : 'c-muted'}">${m.dd.toFixed(1)}%</span>`;
+    const ddCell  = `<span class="${m.dd < -5 ? (m.dd < -15 ? 'c-red' : 'c-orange') : 'c-muted'}">${m.dd.toFixed(1)}%</span>`;
     const sLowCell = (m.skipped || !m.sLow || m.sLow === m.S1) ? '—'
       : `<span class="${m.sLow < m.K1 ? 'c-red' : 'c-muted'}">${m.sLow.toFixed(0)}</span>`;
-    const bpCell   = m.skipped ? '—'
+    const bpCell  = m.skipped ? '—'
       : m.breachProb > 0.01
         ? `<span class="${m.breachProb > 0.5 ? 'c-red' : m.breachProb > 0.2 ? 'c-orange' : 'c-muted'}">${(m.breachProb * 100).toFixed(0)}%</span>`
         : '<span class="c-muted">—</span>';
@@ -344,6 +377,9 @@ function buildRows(data) {
       <td>${m.date}</td>
       <td>${badge(m.scenario)}</td>
       <td class="${vixColor(m.vix)}">${m.vix}</td>
+      <td>${vixPeakCell}</td>
+      <td>${skewCell}</td>
+      <td>${skewMultCell}</td>
       <td class="c-muted">${m.skipped ? '—' : m.rfr + '%'}</td>
       <td>$${m.S0}</td>
       <td>$${m.S1}</td>
@@ -376,8 +412,7 @@ function setFilter(f, btn) {
 function applyFilter() {
   if (!allRows.length) return;
   const filtered = activeFilter === 'all'
-    ? allRows
-    : allRows.filter(m => m.scenario === activeFilter);
+    ? allRows : allRows.filter(m => m.scenario === activeFilter);
   buildRows(sortRows(filtered));
 }
 
@@ -385,14 +420,10 @@ function applyFilter() {
 function sortBy(col) {
   if (sortCol === col) sortDir *= -1;
   else { sortCol = col; sortDir = 1; }
-  // Update header classes
-  document.querySelectorAll('table.tl th').forEach(th => {
-    th.classList.remove('sort-asc','sort-desc');
-  });
-  const ths = document.querySelectorAll('table.tl th');
-  const cols = ['date','scenario','vix','rfr','S0','S1',null,'K1','K2','netPrem','margPerSh','premiumPct','retPct','dollarPnl','cap','dd','sLow','breachProb'];
+  document.querySelectorAll('table.tl th').forEach(th => th.classList.remove('sort-asc','sort-desc'));
+  const cols = ['date','scenario','vix','vixHigh','skewVal','skewMultShort','rfr','S0','S1',null,'K1','K2','netPrem','margPerSh','premiumPct','retPct','dollarPnl','cap','dd','sLow','breachProb'];
   const idx = cols.indexOf(col);
-  if (idx >= 0) ths[idx].classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+  if (idx >= 0) document.querySelectorAll('table.tl th')[idx].classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
   applyFilter();
 }
 
@@ -408,9 +439,9 @@ function sortRows(rows) {
 // ── CSV EXPORT ──
 function exportCSV() {
   if (!allRows.length) return;
-  const cols = ['date','scenario','vix','rfr','S0','S1','K1','K2','netPrem','margPerSh','premiumPct','retPct','retCapPct','dollarPnl','cap','dd','sLow','breachProb'];
-  const header = 'Month,Outcome,VIX,RFR%,SPY_entry,SPY_exit,K1_short,K2_long,Prem_per_sh,Margin_per_sh,Prem_pct,Ret_on_margin_pct,Ret_on_capital_pct,PnL_EUR,Capital_EUR,Drawdown_pct,Est_low,Breach_prob';
-  const rows = allRows.map(m => cols.map(c => m[c] !== undefined ? m[c] : '').join(','));
+  const cols = ['date','scenario','vix','vixHigh','skewVal','skewMultShort','skewMultLong','rfr','S0','S1','K1','K2','netPrem','margPerSh','premiumPct','retPct','retCapPct','dollarPnl','cap','dd','sLow','breachProb'];
+  const header = 'Month,Outcome,VIX,VIX_peak,SKEW,SkewMult_short,SkewMult_long,RFR%,SPY_entry,SPY_exit,K1_short,K2_long,Prem_per_sh,Margin_per_sh,Prem_pct,Ret_on_margin_pct,Ret_on_capital_pct,PnL_EUR,Capital_EUR,Drawdown_pct,Est_low,Breach_prob';
+  const rows = allRows.map(m => cols.map(c => m[c] != null ? m[c] : '').join(','));
   const blob = new Blob([header + '\n' + rows.join('\n')], { type:'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = 'tradelog.csv'; a.click();
@@ -428,6 +459,8 @@ function run() {
   const rfrCtrl = document.getElementById('rfrCtrl');
   if (rfrCtrl) rfrCtrl.style.display = p.useHistRFR ? 'none' : '';
 
+  updateSkewControls();
+
   const result = runBacktest(p);
   if (!result) return;
 
@@ -439,16 +472,37 @@ function run() {
   buildRows(sortRows(allRows));
 }
 
-// ── RFR TOGGLE ──
+// ── EVENT LISTENERS ──
 document.getElementById('rfrMode').addEventListener('change', () => {
   const rfrCtrl = document.getElementById('rfrCtrl');
   if (rfrCtrl) rfrCtrl.style.display = document.getElementById('rfrMode').value === 'hist' ? 'none' : '';
 });
 
-// ── INIT ──
-populateYears();
-loadParamsFromURL();
-run();
+document.getElementById('dataSource').addEventListener('change', () => {
+  updateSkewControls();
+});
+
+// ── INIT: load CSVs, then run ──
+(async () => {
+  populateYears();
+  loadParamsFromURL();
+
+  const result = await loadRealData();
+
+  if (!result.ok) {
+    const sel = document.getElementById('dataSource');
+    sel.value = 'sim';
+    sel.disabled = true;
+    const badge = document.getElementById('dataBadge');
+    badge.textContent = '⚠ CSV load failed — Simulated mode';
+    badge.className = 'data-badge sim';
+  } else {
+    updateDataBadge(document.getElementById('dataSource').value);
+  }
+
+  updateSkewControls();
+  run();
+})();
 </script>
 </body>
 </html>

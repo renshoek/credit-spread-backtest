@@ -18,11 +18,27 @@
       <div class="header-badge">Strategy Engine</div>
       <div class="header-title">Put Credit Spread<br><span>Backtest Engine</span></div>
       <div class="header-sub">SPY &middot; 2000&ndash;2024 &middot; Black-Scholes simulation &middot; NOT real options data</div>
+      <div id="dataBadge" class="data-badge sim">&#8635; Loading CBOE data…</div>
     </div>
 
     <div style="display:flex;flex-direction:column;gap:10px;">
 
-      <!-- Row 1: core strategy -->
+      <!-- Row 0: Data source -->
+      <div class="controls">
+        <div class="ctrl data-source-ctrl" style="min-width:160px">
+          <div class="ctrl-label">VIX &amp; Skew source</div>
+          <select id="dataSource">
+            <option value="real" selected>Real — CBOE</option>
+            <option value="sim">Simulated</option>
+          </select>
+        </div>
+        <div style="align-self:flex-end;padding-bottom:10px;font-family:var(--font-mono);font-size:9px;color:var(--muted2);max-width:340px;line-height:1.6;">
+          <strong style="color:var(--green)">Real:</strong> VIX_History.csv + SKEW_History.csv from repo &middot; SKEW-derived put skew per month &middot; actual intra-month VIX peaks<br>
+          <strong style="color:var(--muted2)">Sim:</strong> rounded VIX approximations &middot; your static skew multiplier inputs
+        </div>
+      </div>
+
+      <!-- Row 1: Core strategy -->
       <div class="controls">
         <div class="ctrl">
           <div class="ctrl-label">Short OTM %</div>
@@ -46,8 +62,8 @@
         </div>
       </div>
 
-      <!-- Row 2: vol / skew / risk params -->
-      <div class="controls">
+      <!-- Row 2: Vol / skew / risk -->
+      <div class="controls" id="skewRow">
         <div class="ctrl">
           <div class="ctrl-label">Short skew &times;</div>
           <input type="number" id="skewShort" value="1.30" min="1.00" max="2.00" step="0.05">
@@ -74,7 +90,14 @@
         </div>
       </div>
 
-      <!-- Row 3: RFR + date range + toggles + run -->
+      <!-- Skew note (real mode only) -->
+      <div class="skew-note" id="skewNote">
+        <span>&#9432;</span>
+        <span><strong>Real mode:</strong> skew multipliers computed per month from CBOE SKEW index —
+          <code>1 + (SKEW&minus;100) &times; OTM% / 500</code>. Static inputs above are ignored.</span>
+      </div>
+
+      <!-- Row 3: RFR + date range + run -->
       <div class="controls">
         <div class="ctrl" style="min-width:100px">
           <div class="ctrl-label">Risk-free rate</div>
@@ -107,20 +130,27 @@
     </div>
   </div>
 
+  <!-- ── ACCURACY BANNER ── -->
+  <div class="accuracy-banner sim" id="accuracyBanner">
+    <div class="accuracy-icon">&#8635;</div>
+    <div>Loading CBOE data from CSV files…</div>
+  </div>
+
   <!-- ── PARAM HELP ── -->
   <details class="param-help">
     <summary>Parameter guide &amp; methodology</summary>
     <div class="param-help-body">
       <div class="ph-item"><strong>Short OTM %</strong> — How far below current SPY the short put strike is. 5% = sell put at 95% of SPY price. Lower = more premium, higher chance of being tested.</div>
-      <div class="ph-item"><strong>Long OTM %</strong> — How far below current SPY the long put strike is. Must be deeper than short. Defines max loss width (spread width = long - short).</div>
-      <div class="ph-item"><strong>DTE</strong> — Days to expiration. Standard monthly = 30, Tastytrade = 45. More DTE = more premium but more time risk. Note: outcome is still checked at month-end close.</div>
-      <div class="ph-item"><strong>Margin use %</strong> — Fraction of total capital deployed as margin each month. 25% = professional standard. At 25%, a full-loss month costs -25% of capital. Never go above 30–35%.</div>
-      <div class="ph-item"><strong>Short/Long skew &times;</strong> — IV multipliers applied to VIX. OTM puts trade at higher IV than ATM (the "skew"). 1.30/1.50 are estimates for 5%/8% OTM SPY puts. Higher = bigger premiums collected. Real skew varies by market regime.</div>
-      <div class="ph-item"><strong>VIX floor / ceiling</strong> — Only enter trades when VIX is within this range. Floor: skip low-vol months (tiny premiums). Ceiling: skip extreme fear (too risky). Set 0 / 999 to always trade.</div>
-      <div class="ph-item"><strong>Stop-loss &times; prem</strong> — Close early if loss reaches this multiple of premium collected. Tastytrade standard: 2&times;. Set 0 to hold to expiry. In this model, stop is approximated at month-end.</div>
-      <div class="ph-item"><strong>Slippage $</strong> — Per-spread cost deducted from premium. Covers bid-ask spread + commissions. Real value: $1.50–3.00 for SPY. Default $1.50 is conservative.</div>
-      <div class="ph-item"><strong>Risk-free rate</strong> — Used in Black-Scholes pricing. "Historical" uses actual monthly Fed Funds Rate (0.07% in 2014 to 6.5% in 2000). "Fixed" uses your input. Historical is more accurate.</div>
-      <div class="ph-item"><strong>Intra-month risk</strong> — Estimates whether SPY likely dipped below your short strike mid-month using VIX-implied vol (Brownian bridge model). When enabled with a stop-loss, catches cases where the stop would have triggered mid-month even though the month-end close recovered. Without stop-loss, month-end close determines outcome (correct for hold-to-expiry). Breach probability shown in tooltips.</div>
+      <div class="ph-item"><strong>Long OTM %</strong> — How far below current SPY the long put strike is. Must be deeper than short. Defines max loss width (spread width = long &minus; short).</div>
+      <div class="ph-item"><strong>DTE</strong> — Days to expiration. Standard monthly = 30, Tastytrade = 45. Outcome is still checked at month-end close.</div>
+      <div class="ph-item"><strong>Margin use %</strong> — Fraction of capital deployed as margin each month. 25% = professional standard. At 25%, a full-loss month costs &minus;25% of capital.</div>
+      <div class="ph-item ph-real"><strong>Short/Long skew &times; (Simulated mode only)</strong> — Static IV multipliers applied to VIX. 1.30/1.50 are estimates for 5%/8% OTM puts. In <strong>Real mode</strong> these are replaced by dynamic SKEW-derived values per month.</div>
+      <div class="ph-item ph-real"><strong>CBOE SKEW Index (Real mode)</strong> — Measures cost of tail-risk protection. Formula: <code>mult = 1 + (SKEW&minus;100) &times; OTM% / 500</code>. SKEW=130 at 5% OTM gives ×1.30. Steepens in crashes, flattens in calm markets.</div>
+      <div class="ph-item ph-real"><strong>Intra-month VIX high (Real mode)</strong> — Uses actual daily VIX peak within each month for path estimation, not just month-end close. Oct 2008: close=59.9 but intra-month high=89.5.</div>
+      <div class="ph-item"><strong>VIX floor / ceiling</strong> — Skip months if VIX outside range. 0 / 999 = always trade.</div>
+      <div class="ph-item"><strong>Stop-loss &times; prem</strong> — Close early if loss &ge; this multiple of premium. 0 = hold to expiry. Tastytrade standard: 2&times;.</div>
+      <div class="ph-item"><strong>Slippage $</strong> — Per-spread cost deducted from premium (bid-ask + commissions). Real: $1.50–3.00.</div>
+      <div class="ph-item"><strong>Risk-free rate</strong> — Historical = actual monthly Fed Funds Rate (FRED). Fixed = your input.</div>
     </div>
   </details>
 
@@ -140,11 +170,9 @@
 
   <!-- ── PANELS ── -->
   <div class="chart-wrap">
-
     <div class="tab-panel active" id="panel-equity">
       <canvas id="chartEquity" height="340"></canvas>
     </div>
-
     <div class="tab-panel" id="panel-monthly">
       <div class="legend-row">
         <span><span style="color:var(--green)">&#9646;</span> Win</span>
@@ -155,18 +183,15 @@
       </div>
       <canvas id="chartMonthly" height="320"></canvas>
     </div>
-
     <div class="tab-panel" id="panel-annual">
       <div class="annual-chart-scroll">
         <canvas id="chartAnnual" height="260"></canvas>
       </div>
       <div class="annual-grid" id="annualGrid"></div>
     </div>
-
     <div class="tab-panel" id="panel-drawdown">
       <canvas id="chartDrawdown" height="340"></canvas>
     </div>
-
   </div>
 
   <!-- ── WALK-FORWARD ── -->
@@ -192,7 +217,7 @@
           <th>Max DD</th><th>SPY CAGR</th>
         </tr></thead>
         <tbody id="wfBody">
-          <tr><td colspan="8" style="text-align:center;color:var(--muted)">Press Run to load</td></tr>
+          <tr><td colspan="8" style="text-align:center;color:var(--muted)">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -201,16 +226,14 @@
   <!-- ── DISCLAIMER ── -->
   <div class="disclaimer">
     <strong>&#9888; THIS IS A SIMULATION, NOT A REAL BACKTEST.</strong>
-    Option prices are computed via Black-Scholes using VIX as an IV proxy with static skew multipliers.
-    Real options have actual traded prices, bid-ask spreads, and IV surfaces that differ significantly.
-    A real backtest requires historical options chain data (CBOE OptionMetrics, ~$10k+/yr; OptionsDX ~$100/yr).
-    Premiums may be 10&ndash;30% off from real market prices.
+    Option prices are computed via Black-Scholes using VIX as an IV proxy.
+    Even in Real CBOE mode, premiums may be 10&ndash;30% off from actual traded prices.
+    Real options data: <a href="https://optionsdx.com" target="_blank">OptionsDX</a> (~$100/yr) or
+    <a href="https://datashop.cboe.com" target="_blank">CBOE DataShop</a> ($10k+/yr).
     <br><br>
-    <strong>&#9888; REMAINING BIASES:</strong>
-    Monthly SPY closes only &mdash; intra-month path is estimated, not observed.
-    DTE affects premium pricing but outcome is always checked at month-end (not actual expiry date).
-    No dividend impact (~1.3%/yr). No term structure. No gamma risk. No early assignment.
-    Skew multipliers are static &mdash; real skew steepens in crashes, flattens in calm.
+    <strong>&#9888; REMAINING BIASES (both modes):</strong>
+    Monthly SPY closes only &mdash; intra-month SPY path is estimated, not observed.
+    No dividends (~1.3%/yr). No term structure. No gamma. No early assignment.
     Past performance does not guarantee future results.
     <a href="https://tastytrade.com/research/" target="_blank">Tastytrade Research</a> publishes free verified performance for this strategy type.
   </div>
@@ -219,5 +242,63 @@
 
 <script src="data.js"></script>
 <script src="backtest.js"></script>
+<script>
+// ── Update accuracy banner ──
+function updateBanner(source, loadError) {
+  const banner = document.getElementById('accuracyBanner');
+  if (loadError) {
+    banner.className = 'accuracy-banner sim';
+    banner.innerHTML = `<div class="accuracy-icon" style="color:var(--red)">&#9888;</div>
+      <div><strong style="color:var(--red)">Could not load CSV files (${loadError}).</strong>
+      Make sure VIX_History.csv and SKEW_History.csv are in the same directory.
+      Running in <strong>Simulated mode</strong> instead.</div>`;
+    return;
+  }
+  if (source === 'real') {
+    banner.className = 'accuracy-banner real';
+    banner.innerHTML = `<div class="accuracy-icon">&#10003;</div>
+      <div><strong>Real CBOE data active.</strong>
+      VIX: official CBOE monthly closes (2000–2024) &middot;
+      SKEW: CBOE SKEW index, dynamic put-skew multipliers per month &middot;
+      Intra-month estimation uses actual peak daily VIX per month.
+      <strong>Still simulated:</strong> SPY monthly closes only &mdash; no daily OHLC.
+      Option premiums via Black-Scholes &mdash; not real options chains.
+      Real premiums: <a href="https://optionsdx.com" target="_blank">OptionsDX</a> (~$100/yr).</div>`;
+  } else {
+    banner.className = 'accuracy-banner sim';
+    banner.innerHTML = `<div class="accuracy-icon">&#9888;</div>
+      <div><strong>Simulated data mode.</strong>
+      VIX values are rounded approximations. Skew multipliers are your static inputs.
+      Switch to <strong>Real CBOE</strong> for actual VIX closes and SKEW-derived dynamic skew per month.</div>`;
+  }
+}
+
+// ── Sync badge + banner + skew controls on source change ──
+document.getElementById('dataSource').addEventListener('change', function () {
+  updateSkewControls();
+  updateBanner(this.value, null);
+});
+
+// ── INIT: load CSVs, then run ──
+(async () => {
+  const result = await loadRealData();
+
+  if (!result.ok) {
+    // CSV load failed — force sim mode and lock the selector
+    const sel = document.getElementById('dataSource');
+    sel.value = 'sim';
+    sel.disabled = true;
+    updateBanner('sim', result.error);
+    updateDataBadge('sim');
+    updateSkewControls();
+  } else {
+    updateBanner('real', null);
+    updateDataBadge('real');
+    updateSkewControls();
+  }
+
+  run();
+})();
+</script>
 </body>
 </html>
