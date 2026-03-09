@@ -123,14 +123,15 @@ const VIX = VIX_SIM;
 // null until loaded; backtest engine checks REAL_DATA_LOADED
 // ══════════════════════════════════════════════════════════════
 
-let VIX_REAL         = null;  // monthly VIX close (last trading day of each month)
-let VIX_MONTHLY_HIGH = null;  // highest daily VIX HIGH reached within each month
-let SKEW_REAL        = null;  // monthly SKEW index close
-let SPY_REAL         = null;  // monthly SPY adjusted close (last trading day — entry price)
-let SPY_SETTLE       = null;  // SPY adjusted close on 3rd Friday (actual settlement price)
-let SPY_MONTHLY_LOW  = null;  // lowest adjusted low of any day in the month (actual intra-month path)
-let REAL_DATA_LOADED = false;
-let REAL_DATA_ERROR  = null;
+let VIX_REAL          = null;
+let VIX_MONTHLY_HIGH  = null;
+let SKEW_REAL         = null;
+let SPY_REAL          = null;
+let SPY_SETTLE        = null;   // adjusted close on 3rd Friday  (BS mode)
+let SPY_SETTLE_ACTUAL = null;   // raw (unadjusted) close on 3rd Friday (chain mode — actual option settlement price)
+let SPY_MONTHLY_LOW   = null;
+let REAL_DATA_LOADED  = false;
+let REAL_DATA_ERROR   = null;
 
 // ── REAL OPTIONS CHAIN (from options_chain.json) ──
 // Populated by loadOptionsChain(). When available, the backtest engine
@@ -319,6 +320,8 @@ async function loadRealData(
     // ── Parse SPY ──
     // Per month: last-day adjusted close, 3rd Friday adjusted close,
     // and minimum adjusted low (= low × adj_close / close).
+    // Also store raw (unadjusted) close for options settlement — options
+    // expire against actual traded prices, not dividend-adjusted prices.
     const spyRows = _parseCSV(spyText);
 
     // Build lookup: date → row
@@ -329,8 +332,9 @@ async function loadRealData(
       const low   = parseFloat(row.low);
       if (!isNaN(close) && close > 0 && !isNaN(adj) && !isNaN(low)) {
         spyByDate[row.date.trim()] = {
-          adjClose: adj,
-          adjLow:   low * (adj / close)   // adjust the low by the same ratio
+          adjClose:  adj,
+          rawClose:  close,                     // ← actual price, used for options settlement
+          adjLow:    low * (adj / close)        // adjust the low by the same ratio
         };
       }
     }
@@ -348,7 +352,9 @@ async function loadRealData(
       }
     }
 
-    // 3rd Friday settlement: find closest prior trading day if exact date missing
+    // 3rd Friday settlement — two variants:
+    //   settleClose()      → adjusted close (for BS mode, internally consistent)
+    //   settleCloseRaw()   → actual close   (for chain mode — options settle vs actual price)
     function settleClose(year, month) {
       const target = _thirdFriday(year, month);
       for (let delta = 0; delta <= 3; delta++) {
@@ -357,26 +363,38 @@ async function loadRealData(
         const ds = d.toISOString().slice(0, 10);
         if (spyTradingDates.has(ds)) return spyByDate[ds].adjClose;
       }
-      return null; // not in CSV
+      return null;
+    }
+    function settleCloseRaw(year, month) {
+      const target = _thirdFriday(year, month);
+      for (let delta = 0; delta <= 3; delta++) {
+        const d = new Date(target);
+        d.setDate(d.getDate() - delta);
+        const ds = d.toISOString().slice(0, 10);
+        if (spyTradingDates.has(ds)) return spyByDate[ds].rawClose;
+      }
+      return null;
     }
 
     // ── Build ordered arrays ──
     const months = _buildMonthList();
     const missing = [];
 
-    VIX_REAL         = [];
-    VIX_MONTHLY_HIGH = [];
-    SKEW_REAL        = [];
-    SPY_REAL         = [];
-    SPY_SETTLE       = [];
-    SPY_MONTHLY_LOW  = [];
+    VIX_REAL          = [];
+    VIX_MONTHLY_HIGH  = [];
+    SKEW_REAL         = [];
+    SPY_REAL          = [];
+    SPY_SETTLE        = [];
+    SPY_SETTLE_ACTUAL = [];
+    SPY_MONTHLY_LOW   = [];
 
     months.forEach((mk, idx) => {
-      const [y, m]  = mk.split('-').map(Number);
-      const hasVix  = vixMonthClose[mk] != null;
-      const hasSkew = skewMonthClose[mk] != null;
-      const hasSpy  = spyMonthClose[mk] != null;
-      const settle  = settleClose(y, m);
+      const [y, m]     = mk.split('-').map(Number);
+      const hasVix     = vixMonthClose[mk] != null;
+      const hasSkew    = skewMonthClose[mk] != null;
+      const hasSpy     = spyMonthClose[mk] != null;
+      const settle     = settleClose(y, m);
+      const settleRaw  = settleCloseRaw(y, m);
 
       if (!hasVix || !hasSkew) missing.push(mk + '(vix/skew)');
       if (!hasSpy || !settle)  missing.push(mk + '(spy)');
@@ -385,7 +403,8 @@ async function loadRealData(
       VIX_MONTHLY_HIGH.push(hasVix ? Math.round(vixMonthHigh[mk]  * 100) / 100 : (VIX_SIM[idx] || 20));
       SKEW_REAL.push(hasSkew ? Math.round(skewMonthClose[mk] * 10) / 10 : 120);
       SPY_REAL.push(hasSpy   ? Math.round(spyMonthClose[mk] * 100) / 100 : SPY[idx]);
-      SPY_SETTLE.push(settle != null ? Math.round(settle * 100) / 100 : SPY[idx]);
+      SPY_SETTLE.push(settle != null           ? Math.round(settle    * 100) / 100 : SPY[idx]);
+      SPY_SETTLE_ACTUAL.push(settleRaw != null ? Math.round(settleRaw * 100) / 100 : (settle != null ? Math.round(settle * 100) / 100 : SPY[idx]));
       SPY_MONTHLY_LOW.push(hasSpy ? Math.round(spyMonthLow[mk] * 100) / 100 : null);
     });
 
@@ -400,7 +419,7 @@ async function loadRealData(
       `loadRealData OK — ${months.length} months` +
       ` | VIX ${Math.min(...VIX_REAL).toFixed(1)}–${Math.max(...VIX_REAL).toFixed(1)}` +
       ` | SKEW ${Math.min(...SKEW_REAL).toFixed(1)}–${Math.max(...SKEW_REAL).toFixed(1)}` +
-      ` | SPY settle ${Math.min(...SPY_SETTLE).toFixed(1)}–${Math.max(...SPY_SETTLE).toFixed(1)}`
+      ` | SPY settle actual ${Math.min(...SPY_SETTLE_ACTUAL).toFixed(1)}–${Math.max(...SPY_SETTLE_ACTUAL).toFixed(1)}`
     );
     return { ok: true, missing: uniqueMissing };
 
@@ -408,7 +427,7 @@ async function loadRealData(
     REAL_DATA_ERROR  = err.message;
     REAL_DATA_LOADED = false;
     VIX_REAL = VIX_MONTHLY_HIGH = SKEW_REAL = null;
-    SPY_REAL = SPY_SETTLE = SPY_MONTHLY_LOW = null;
+    SPY_REAL = SPY_SETTLE = SPY_SETTLE_ACTUAL = SPY_MONTHLY_LOW = null;
     console.error('loadRealData failed:', err.message);
     return { ok: false, error: err.message };
   }

@@ -137,16 +137,19 @@ function runBacktest(params) {
   // Whether real SPY daily data is available
   const useRealSPY = useReal && SPY_REAL && SPY_SETTLE && SPY_MONTHLY_LOW;
 
+  // S0 (display/path reference) still uses adjusted prices throughout for B&H consistency
+  // S1 for P&L uses actual prices when chain is active (see inner loop)
+
   for (let i = 1; i < n; i++) {
     const yr = getYear(i);
     if (yr < startYear || yr > endYear) continue;
 
     // ── SPY prices ──
-    // Real mode: S0 = last-day adjusted close of prior month (entry)
-    //            S1 = 3rd Friday adjusted close (actual settlement)
-    // Sim mode:  both from the hardcoded monthly array
+    // S0 = prior month-end adjusted close.
+    // Used for: B&H benchmark tracking, intra-month path estimation (Brownian bridge), display.
+    // NOT used for strike placement when chain is active (S0chain is used instead).
     const S0 = useRealSPY ? SPY_REAL[i - 1] : SPY[i - 1];
-    const S1 = useRealSPY ? SPY_SETTLE[i]   : SPY[i];
+    // S1 for B&H: always adjusted, declared after chain/BS determination below.
 
     // ── VIX for pricing (month-end close at entry) ──
     const vixRaw = useReal ? VIX_REAL[i - 1] : VIX_SIM[i - 1];
@@ -161,12 +164,16 @@ function runBacktest(params) {
     const date = getLabel(i);
     const year = String(yr);
 
+    // S0_adj used for B&H benchmark (adjusted close, consistent full-period comparison)
+    const S0_adj = S0;
+    const S1_adj = useRealSPY ? SPY_SETTLE[i] : SPY[i];
+
     // VIX filter
     if (vixRaw < vixFloor || vixRaw > vixCeil) {
       skippedMonths++;
-      const spyBnH = startCap * (S1 / spyWindowBase);
+      const spyBnH = startCap * (S1_adj / spyWindowBase);
       monthly.push({
-        date, year, S0, S1, vix: +vixRaw.toFixed(2),
+        date, year, S0, S1: S1_adj, vix: +vixRaw.toFixed(2),
         skipped: true,
         retPct: 0, retCapPct: 0, dollarPnl: 0,
         cap: +cap.toFixed(2), spyBnH: +spyBnH.toFixed(2),
@@ -188,6 +195,14 @@ function runBacktest(params) {
     const chainKey   = getLabel(i - 1);
     const chainEntry = (useReal && OPTIONS_CHAIN) ? chainLookup(chainKey, shortOTMp) : null;
     const useChain   = chainEntry !== null;
+
+    // ── S1: settlement price ──
+    // Chain mode: use actual (unadjusted) close — options settle vs actual market price.
+    //   The chain underlying is also actual price, so strikes and settlement are consistent.
+    // BS/sim mode: adjusted close — S0 is also adjusted, so relative move is correct.
+    const S1 = useChain
+      ? (SPY_SETTLE_ACTUAL ? SPY_SETTLE_ACTUAL[i] : (useRealSPY ? SPY_SETTLE[i] : SPY[i]))
+      : (useRealSPY ? SPY_SETTLE[i] : SPY[i]);
 
     // ── S0: underlying price at entry ──
     // Chain mode:   actual SPY price on first trading day of entry month (from chain file)
@@ -250,7 +265,7 @@ function runBacktest(params) {
     // ── Intra-month path ──
     // Real SPY mode: use actual minimum daily low observed during the month.
     //   breachProb is binary — the low either went below K1 or it didn't.
-    // Sim mode: estimate low via VIX-implied Brownian bridge.
+    // Intra-month path estimation uses S0 (adjusted, ≈ entry frame) and S1 (settlement)
     let breachProb = 0;
     let sLow = S1;
     let actualPath = false;
@@ -270,15 +285,13 @@ function runBacktest(params) {
       }
     }
 
-    // ── P&L ──
+    // ── P&L — uses S1 (actual price when chain, adjusted otherwise) ──
     let rawPnlSh;
     if      (S1 >= K1) rawPnlSh =  netPrem;
     else if (S1 <= K2) rawPnlSh = -margPerSh;
     else               rawPnlSh =  netPrem - (K1 - S1);
 
     // ── Stop-loss ──
-    // With actual path (real SPY): use observed intra-month low directly.
-    // With estimated path (sim): same logic but probabilistic.
     let pnlSh = rawPnlSh;
     let stopped = false;
     if (stopLossMult > 0) {
@@ -308,17 +321,13 @@ function runBacktest(params) {
     if (cap > peak) peak = cap;
 
     const dd        = peak > 0 ? ((cap - peak) / peak) * 100 : 0;
-    const spyBnH    = startCap * (S1 / spyWindowBase);
+    const spyBnH    = startCap * (S1_adj / spyWindowBase);   // B&H always on adjusted prices
     const retPct    = retOnMargin * 100;
     const retCapPct = retOnMargin * margFrac * 100;
 
     let scenario = S1 >= K1 ? 'win' : S1 <= K2 ? 'full_loss' : 'partial';
     if (stopped) scenario = 'stopped';
 
-    // win       = expired worthless (S1 ≥ K1, full premium kept)
-    //             This is the industry-standard "win rate" metric.
-    // profitable = any month with positive P&L (includes partial wins
-    //              where K2 < S1 < K1 but loss < premium collected)
     const win        = scenario === 'win';
     const profitable = dollarPnl >= 0;
 
@@ -342,11 +351,11 @@ function runBacktest(params) {
       rfr:        +(r * 100).toFixed(2),
       breachProb: +breachProb.toFixed(2),
       sLow:       +sLow.toFixed(1),
-      actualPath,   // true = sLow is real observed data, false = Brownian bridge estimate
+      actualPath,
       skewVal:    skewVal !== null ? +skewVal.toFixed(1) : null,
       skewMultShort: skewMultShortVal != null ? +skewMultShortVal.toFixed(3) : null,
       skewMultLong:  skewMultLongVal  != null ? +skewMultLongVal.toFixed(3)  : null,
-      pricingMode,   // 'chain' | 'bs'
+      pricingMode,
       chainKey
     });
   }
