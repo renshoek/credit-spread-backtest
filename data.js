@@ -1,27 +1,42 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// data.js — Historical market data for Put Credit Spread Backtest Engine
+// data.js — Market data for Put Credit Spread Backtest Engine
 //
-// SOURCE NOTES:
-//   SPY  — Monthly adjusted closing prices, Yahoo Finance / CRSP
-//          Jan 2000 – Dec 2024 (300 data points)
-//   VIX  — CBOE Volatility Index monthly close, CBOE.com
-//          Represents 30-day implied volatility of S&P 500 options (ATM)
-//   RFR  — Effective Federal Funds Rate monthly averages (%)
-//          Source: FRED (DFF series). Used as risk-free rate in Black-Scholes.
+// TWO DATA SOURCES:
 //
-// LIMITATIONS:
-//   End-of-month closing prices only. Intra-month path is unknown.
-//   No real options chain data — premiums are estimated via Black-Scholes.
-//   Real historical options data sources:
-//     - CBOE DataShop: datashop.cboe.com (authoritative, expensive)
-//     - OptionsDX:     optionsdx.com (~$100/year for SPY)
-//     - Tastytrade:    publishes free verified strategy backtests
+// SIMULATED (hardcoded, always available):
+//   SPY  — Monthly adjusted closes, Yahoo Finance / CRSP (approximated)
+//   VIX_SIM — CBOE VIX monthly closes (rounded approximations)
+//   RFR  — Effective Federal Funds Rate monthly averages, FRED (DFF)
+//
+// REAL (loaded from CSV files at runtime via loadRealData()):
+//   VIX_History.csv  → VIX_REAL (monthly close) + VIX_MONTHLY_HIGH (monthly max HIGH)
+//   SKEW_History.csv → SKEW_REAL (monthly close)
+//
+//   Expected CSV formats (CBOE standard downloads):
+//     VIX_History.csv:  DATE,OPEN,HIGH,LOW,CLOSE  (daily rows, DATE = MM/DD/YYYY)
+//     SKEW_History.csv: DATE,SKEW                 (daily rows, DATE = MM/DD/YYYY)
+//
+//   Call loadRealData() once on page load. It returns a Promise and populates
+//   VIX_REAL, VIX_MONTHLY_HIGH, SKEW_REAL once resolved.
+//
+// SKEW → Dynamic skew multiplier:
+//   skewToMult(otmPct, skewVal) = 1 + (skewVal - 100) × otmPct / 500
+//   SKEW=130, 5% OTM → ×1.30 | SKEW=130, 8% OTM → ×1.48
+//
+// REMAINING LIMITATIONS (both sources):
+//   Monthly SPY closes only — no daily OHLC for SPY.
+//   Premiums via Black-Scholes — not real options chain data.
+//   Real options data: OptionsDX.com (~$100/yr for SPY).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DATA_START_YEAR = 2000;
 const DATA_END_YEAR   = 2024;
 
-// ── SPY monthly adjusted closing prices (USD) ──
+// ══════════════════════════════════════════════════════════════
+// SIMULATED DATA (hardcoded, always available)
+// ══════════════════════════════════════════════════════════════
+
+// SPY monthly adjusted closing prices (USD)
 const SPY = [
   148,140,142,136,133,129,126,131,120,115,110,110,
   108,116,112,115,118,115,115,107, 90, 95,104,103,
@@ -50,8 +65,8 @@ const SPY = [
   489,501,521,505,529,546,554,564,572,579,596,591
 ];
 
-// ── VIX monthly closing values ──
-const VIX = [
+// VIX monthly closing values (rounded approximations)
+const VIX_SIM = [
    24,25,26,22,22,23,23,21,25,22,25,23,
    23,22,24,20,19,22,21,33,34,36,30,22,
    21,22,22,22,24,27,31,38,37,34,28,28,
@@ -79,7 +94,7 @@ const VIX = [
    13,14,12,15,12,12,15,15,16,23,13,16
 ];
 
-// ── Fed Funds Rate — monthly averages (%) ──
+// Fed Funds Rate monthly averages (%), FRED DFF series
 const RFR = [
   5.45,5.73,5.85,6.02,6.27,6.53,6.54,6.50,6.52,6.51,6.51,6.40,
   5.98,5.49,5.31,4.80,4.21,3.97,3.77,3.65,3.07,2.49,2.09,1.82,
@@ -108,6 +123,150 @@ const RFR = [
   5.33,5.33,5.33,5.33,5.33,5.33,5.33,5.33,5.33,4.83,4.58,4.33
 ];
 
-if (SPY.length !== 300 || VIX.length !== 300 || RFR.length !== 300) {
-  console.warn('Data length mismatch — expected 300 months (2000–2024)');
+// Legacy alias kept for backward compat
+const VIX = VIX_SIM;
+
+// ══════════════════════════════════════════════════════════════
+// REAL DATA — populated asynchronously by loadRealData()
+// null until loaded; backtest engine checks REAL_DATA_LOADED
+// ══════════════════════════════════════════════════════════════
+
+let VIX_REAL         = null;  // monthly VIX close (last trading day of each month)
+let VIX_MONTHLY_HIGH = null;  // highest daily VIX HIGH reached within each month
+let SKEW_REAL        = null;  // monthly SKEW index close
+let REAL_DATA_LOADED = false;
+let REAL_DATA_ERROR  = null;
+
+// ── SKEW → IV multiplier ──
+function skewToMult(otmPct, skewVal) {
+  return 1 + (skewVal - 100) * otmPct / 500;
+}
+
+// ══════════════════════════════════════════════════════════════
+// CSV LOADER
+// ══════════════════════════════════════════════════════════════
+
+// "MM/DD/YYYY" → "YYYY-MM"
+function _monthKey(dateStr) {
+  const p = dateStr.trim().split('/');
+  return p.length === 3 ? `${p[2]}-${p[0].padStart(2, '0')}` : null;
+}
+
+// Minimal CSV parser — returns array of {header: value} objects
+function _parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const headers = lines[0].split(',').map(h => h.trim());
+  return lines.slice(1)
+    .filter(l => l.trim())
+    .map(line => {
+      const vals = line.split(',');
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = (vals[i] || '').trim(); });
+      return obj;
+    });
+}
+
+// Ordered list of all YYYY-MM from DATA_START_YEAR-01 to DATA_END_YEAR-12
+function _buildMonthList() {
+  const months = [];
+  let y = DATA_START_YEAR, m = 1;
+  while (y < DATA_END_YEAR || (y === DATA_END_YEAR && m <= 12)) {
+    months.push(`${y}-${String(m).padStart(2, '0')}`);
+    if (++m > 12) { m = 1; y++; }
+  }
+  return months;
+}
+
+// ── loadRealData(vixPath, skewPath) → Promise ──
+// Fetches and parses both CSVs, populates VIX_REAL / VIX_MONTHLY_HIGH / SKEW_REAL.
+// Paths default to same directory as the HTML files.
+// Returns { ok: true } or { ok: false, error: string }.
+async function loadRealData(
+  vixPath  = 'VIX_History.csv',
+  skewPath = 'SKEW_History.csv'
+) {
+  try {
+    const [vixResp, skewResp] = await Promise.all([
+      fetch(vixPath),
+      fetch(skewPath)
+    ]);
+
+    if (!vixResp.ok)  throw new Error(`${vixPath}: HTTP ${vixResp.status}`);
+    if (!skewResp.ok) throw new Error(`${skewPath}: HTTP ${skewResp.status}`);
+
+    const [vixText, skewText] = await Promise.all([
+      vixResp.text(),
+      skewResp.text()
+    ]);
+
+    // ── Parse VIX ──
+    // Iterate all daily rows; last row seen per month = month-end close.
+    // Track running max of daily HIGHs per month.
+    const vixMonthClose = {};
+    const vixMonthHigh  = {};
+
+    for (const row of _parseCSV(vixText)) {
+      const mk = _monthKey(row.DATE);
+      if (!mk) continue;
+      const close = parseFloat(row.CLOSE);
+      const high  = parseFloat(row.HIGH);
+      if (!isNaN(close)) vixMonthClose[mk] = close;             // last day wins
+      if (!isNaN(high))  vixMonthHigh[mk]  = Math.max(vixMonthHigh[mk] || 0, high);
+    }
+
+    // ── Parse SKEW ──
+    const skewMonthClose = {};
+
+    for (const row of _parseCSV(skewText)) {
+      const mk = _monthKey(row.DATE);
+      if (!mk) continue;
+      const val = parseFloat(row.SKEW);
+      if (!isNaN(val)) skewMonthClose[mk] = val;                // last day wins
+    }
+
+    // ── Build ordered arrays ──
+    const months = _buildMonthList();
+    const missing = [];
+
+    VIX_REAL         = [];
+    VIX_MONTHLY_HIGH = [];
+    SKEW_REAL        = [];
+
+    months.forEach((mk, idx) => {
+      const hasVix  = vixMonthClose[mk] != null;
+      const hasSkew = skewMonthClose[mk] != null;
+
+      if (!hasVix || !hasSkew) {
+        missing.push(mk);
+        // Fallback to simulated so engine never crashes
+        VIX_REAL.push(VIX_SIM[idx] || 20);
+        VIX_MONTHLY_HIGH.push(VIX_SIM[idx] || 20);
+        SKEW_REAL.push(120);
+      } else {
+        VIX_REAL.push(Math.round(vixMonthClose[mk] * 100) / 100);
+        VIX_MONTHLY_HIGH.push(Math.round(vixMonthHigh[mk] * 100) / 100);
+        SKEW_REAL.push(Math.round(skewMonthClose[mk] * 10) / 10);
+      }
+    });
+
+    if (missing.length > 0) {
+      console.warn(`loadRealData: ${missing.length} month(s) missing — fell back to simulated:`, missing);
+    }
+
+    REAL_DATA_LOADED = true;
+    REAL_DATA_ERROR  = null;
+    console.log(
+      `loadRealData OK — ${months.length} months` +
+      ` | VIX ${Math.min(...VIX_REAL).toFixed(1)}–${Math.max(...VIX_REAL).toFixed(1)}` +
+      ` | SKEW ${Math.min(...SKEW_REAL).toFixed(1)}–${Math.max(...SKEW_REAL).toFixed(1)}`
+    );
+    return { ok: true, missing };
+
+  } catch (err) {
+    REAL_DATA_ERROR  = err.message;
+    REAL_DATA_LOADED = false;
+    VIX_REAL = VIX_MONTHLY_HIGH = SKEW_REAL = null;
+    console.error('loadRealData failed:', err.message);
+    return { ok: false, error: err.message };
+  }
 }

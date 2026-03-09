@@ -1,19 +1,21 @@
 // ══════════════════════════════════════════════════════════════
-// PUT CREDIT SPREAD — BACKTEST ENGINE (merged)
+// PUT CREDIT SPREAD — BACKTEST ENGINE
 //
-// Depends on: data.js (SPY, VIX, RFR, DATA_START_YEAR, DATA_END_YEAR)
+// Depends on: data.js (SPY, VIX_SIM, VIX_REAL, VIX_MONTHLY_HIGH,
+//                      SKEW_REAL, RFR, skewToMult)
 //
-// THIS IS A SIMULATION, NOT A REAL BACKTEST.
-// Options prices are computed via Black-Scholes using VIX as IV proxy.
-// Real options have actual traded prices and IV surfaces.
+// DATA SOURCES:
+//   'real' — Real CBOE VIX + SKEW index data. Skew multipliers
+//             are derived dynamically per month from SKEW index.
+//             Intra-month estimation uses actual monthly VIX highs.
 //
-// BIAS CORRECTIONS vs earlier versions:
-//   - Historical Fed Funds Rate (not fixed 4%)
-//   - Slippage/commissions (default $1.50/spread)
-//   - Intra-month path estimation via Brownian bridge
-//     (catches mid-month breaches that month-end close hides)
-//   - VIX floor + ceiling filters
-//   - Stop-loss as × premium (Tastytrade standard)
+//   'sim'  — Simulated/approximated VIX. User sets static skew
+//             multiplier inputs. Classic mode.
+//
+// REMAINING LIMITATIONS (both modes):
+//   - SPY uses monthly closes (no daily OHLC)
+//   - Premiums via Black-Scholes (not real options chain data)
+//   - Real premiums available at OptionsDX.com (~$100/yr)
 // ══════════════════════════════════════════════════════════════
 
 const START_YEAR = DATA_START_YEAR;
@@ -48,36 +50,23 @@ function bsPut(S, K, r, T, sigma) {
 
 // ── INTRA-MONTH LOW ESTIMATION ──
 // Brownian bridge: probability that GBM path hit level L during [0, T]
-// given we know S(0) = S0 and S(T) = S1.
-// P(min < L) = exp(-2 * ln(S0/L) * ln(S1/L) / (σ² * T))
-// Only valid when L < min(S0, S1).
 function probBreachBB(S0, S1, L, sigma, T) {
-  if (L >= Math.min(S0, S1)) return 1.0;  // already below or at level
+  if (L >= Math.min(S0, S1)) return 1.0;
   if (L <= 0 || sigma <= 0 || T <= 0) return 0;
   const lnS0L = Math.log(S0 / L);
   const lnS1L = Math.log(S1 / L);
   return Math.exp(-2 * lnS0L * lnS1L / (sigma * sigma * T));
 }
 
-// Estimate the effective intra-month low price.
-// Uses VIX-implied vol to estimate how far SPY likely dipped mid-month,
-// even if it recovered by month-end.
-// Returns a price <= min(S0, S1).
-function estimateIntraMonthLow(S0, S1, vixPct, dteDays) {
-  // Monthly vol from VIX
-  const sigma = vixPct / 100;
+// Estimate intra-month low. Uses vixForPath which is:
+//   Real mode:  actual max VIX daily high during the month (better than month-end)
+//   Sim mode:   month-end VIX (approximation)
+function estimateIntraMonthLow(S0, S1, vixForPath, dteDays) {
+  const sigma = vixForPath / 100;
   const T = dteDays / 365;
   const sigmaT = sigma * Math.sqrt(T);
-
-  // For a Brownian bridge (known start and end), the expected maximum
-  // deviation below the lower endpoint is dampened vs unconstrained GBM.
-  // Empirical approximation: ~0.6× the unconstrained expected max drawdown.
-  // Unconstrained E[max drawdown] ≈ σ√T × √(2/π) ≈ σ√T × 0.798
-  // Bridge-adjusted: × 0.6
   const dipFactor = sigmaT * 0.798 * 0.6;
-  const lowEndpoint = Math.min(S0, S1);
-
-  return lowEndpoint * (1 - dipFactor);
+  return Math.min(S0, S1) * (1 - dipFactor);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -91,25 +80,27 @@ function runBacktest(params) {
     marginPct,
     startYear,
     endYear,
-    dteDays     = 30,
-    skewShort   = 1.30,
-    skewLong    = 1.50,
-    vixFloor    = 0,
-    vixCeil     = 999,
-    stopLossMult= 0,
-    slippage    = 1.50,
-    useHistRFR  = true,
-    fixedRFR    = 4.0,
-    intraMonth  = true        // estimate intra-month path breaches
+    dteDays      = 30,
+    skewShort    = 1.30,   // used only in sim mode
+    skewLong     = 1.50,   // used only in sim mode
+    vixFloor     = 0,
+    vixCeil      = 999,
+    stopLossMult = 0,
+    slippage     = 1.50,
+    useHistRFR   = true,
+    fixedRFR     = 4.0,
+    intraMonth   = true,
+    dataSource   = 'real'  // 'real' | 'sim'
   } = params;
 
-  const longOTMf  = Math.max(longOTMp, shortOTMp + 0.5);
-  const T         = dteDays / 365;
-  const margFrac  = marginPct / 100;
+  const useReal    = dataSource === 'real';
+  const longOTMf   = Math.max(longOTMp, shortOTMp + 0.5);
+  const T          = dteDays / 365;
+  const margFrac   = marginPct / 100;
 
   let cap = startCap, peak = startCap;
   const monthly = [];
-  const n = Math.min(SPY.length, VIX.length, RFR.length);
+  const n = Math.min(SPY.length, VIX_SIM.length, VIX_REAL.length, RFR.length);
   let spyWindowBase = null;
   let skippedMonths = 0;
 
@@ -119,25 +110,34 @@ function runBacktest(params) {
 
     const S0  = SPY[i - 1];
     const S1  = SPY[i];
-    const vixRaw = VIX[i - 1];
+
+    // ── VIX for pricing (month-end close at entry) ──
+    const vixRaw = useReal ? VIX_REAL[i - 1] : VIX_SIM[i - 1];
+
+    // ── VIX for intra-month path estimation ──
+    // Real mode: use actual peak VIX during the trade month (better estimate of turbulence)
+    // Sim mode: use same month-end VIX (no daily data available)
+    const vixForPath = (useReal && intraMonth) ? VIX_MONTHLY_HIGH[i] : vixRaw;
 
     if (spyWindowBase === null) spyWindowBase = S0;
 
     const date = getLabel(i);
     const year = String(yr);
 
-    // VIX filter — skip month if outside comfort zone
+    // VIX filter
     if (vixRaw < vixFloor || vixRaw > vixCeil) {
       skippedMonths++;
       const spyBnH = startCap * (S1 / spyWindowBase);
       monthly.push({
-        date, year, S0, S1, vix: vixRaw,
+        date, year, S0, S1, vix: +vixRaw.toFixed(2),
         skipped: true,
         retPct: 0, retCapPct: 0, dollarPnl: 0,
         cap: +cap.toFixed(2), spyBnH: +spyBnH.toFixed(2),
         dd: peak > 0 ? +((cap - peak) / peak * 100).toFixed(2) : 0,
         win: false, scenario: 'skipped',
-        rfr: 0, breachProb: 0, sLow: 0
+        rfr: 0, breachProb: 0, sLow: 0,
+        skewVal: useReal ? +(SKEW_REAL[i - 1]).toFixed(1) : null,
+        skewMultShort: null, skewMultLong: null
       });
       continue;
     }
@@ -145,74 +145,73 @@ function runBacktest(params) {
     // Risk-free rate
     const r = useHistRFR ? (RFR[i - 1] / 100) : (fixedRFR / 100);
 
-    // Skew-adjusted implied volatilities
-    const sigmaS = Math.max((vixRaw / 100) * skewShort, 0.05);
-    const sigmaL = Math.max((vixRaw / 100) * skewLong,  0.05);
+    // ── Skew multipliers ──
+    // Real mode: derived from CBOE SKEW index for this specific month
+    //   Formula: 1 + (SKEW - 100) × otmPct / 500
+    //   Calibrated so that SKEW=130 at 5% OTM gives mult=1.30 (market consensus)
+    // Sim mode: static user-configured values
+    let sigmaS, sigmaL, skewMultShortVal, skewMultLongVal, skewVal;
+    if (useReal) {
+      skewVal         = SKEW_REAL[i - 1];
+      skewMultShortVal = Math.max(skewToMult(shortOTMp, skewVal), 1.0);
+      skewMultLongVal  = Math.max(skewToMult(longOTMf,  skewVal), 1.0);
+      sigmaS           = Math.max((vixRaw / 100) * skewMultShortVal, 0.05);
+      sigmaL           = Math.max((vixRaw / 100) * skewMultLongVal,  0.05);
+    } else {
+      skewVal          = null;
+      skewMultShortVal = skewShort;
+      skewMultLongVal  = skewLong;
+      sigmaS           = Math.max((vixRaw / 100) * skewShort, 0.05);
+      sigmaL           = Math.max((vixRaw / 100) * skewLong,  0.05);
+    }
 
     // Strike prices
-    const K1 = S0 * (1 - shortOTMp / 100);   // short put
-    const K2 = S0 * (1 - longOTMf / 100);    // long put
+    const K1 = S0 * (1 - shortOTMp / 100);
+    const K2 = S0 * (1 - longOTMf  / 100);
 
-    // Option prices per share (Black-Scholes)
-    const shortPrem = bsPut(S0, K1, r, T, sigmaS);
-    const longPrem  = bsPut(S0, K2, r, T, sigmaL);
-
-    // Net premium after slippage
+    // Option prices (Black-Scholes)
+    const shortPrem  = bsPut(S0, K1, r, T, sigmaS);
+    const longPrem   = bsPut(S0, K2, r, T, sigmaL);
     const rawNetPrem = Math.max(shortPrem - longPrem, 0);
     const netPrem    = Math.max(rawNetPrem - (slippage / 100), 0);
     const margPerSh  = Math.max((K1 - K2) - netPrem, 0.01);
 
-    // ── INTRA-MONTH PATH ESTIMATION ──
-    // Options settle at expiry (≈ month-end), so S1 determines the outcome.
-    // However, mid-month dips matter for stop-loss triggering: if the spread
-    // went deep ITM mid-month, the trader would have closed at the stop level.
-    // We estimate the probable intra-month low using VIX-implied volatility.
+    // ── Intra-month path estimation ──
     let breachProb = 0;
     let sLow = S1;
 
     if (intraMonth) {
-      sLow = estimateIntraMonthLow(S0, S1, vixRaw, dteDays);
+      sLow = estimateIntraMonthLow(S0, S1, vixForPath, dteDays);
 
-      // Probability that short strike was breached mid-month (Brownian bridge)
       if (K1 < Math.min(S0, S1)) {
-        breachProb = probBreachBB(S0, S1, K1, vixRaw / 100, T);
+        breachProb = probBreachBB(S0, S1, K1, vixForPath / 100, T);
       } else if (S1 < K1) {
         breachProb = 1.0;
       }
     }
 
-    // ── P&L CALCULATION ──
-    // Outcome is based on month-end close (S1) — this is when the option settles.
+    // ── P&L ──
     let rawPnlSh;
     if      (S1 >= K1) rawPnlSh =  netPrem;
     else if (S1 <= K2) rawPnlSh = -margPerSh;
     else               rawPnlSh =  netPrem - (K1 - S1);
 
-    // ── STOP-LOSS ──
-    // If enabled, check whether the stop was triggered.
-    // With intra-month estimation: use estimated low to determine if the
-    // spread went deep enough ITM mid-month to trigger the stop, even if
-    // the month-end close recovered.
-    // Without intra-month: only triggers if month-end loss exceeds stop.
+    // ── Stop-loss ──
     let pnlSh = rawPnlSh;
     let stopped = false;
     if (stopLossMult > 0) {
       const stopLevel = -netPrem * stopLossMult;
 
       if (intraMonth && sLow < K1) {
-        // Estimate the worst-case P&L at the intra-month low
         let worstPnl;
-        if      (sLow <= K2) worstPnl = -margPerSh;
-        else                 worstPnl = netPrem - (K1 - sLow);
+        if (sLow <= K2) worstPnl = -margPerSh;
+        else            worstPnl = netPrem - (K1 - sLow);
 
-        // If the intra-month worst would have triggered the stop, apply it
-        // regardless of where the month ended
         if (worstPnl < stopLevel) {
           pnlSh = stopLevel;
           stopped = true;
         }
       }
-      // Also check if the month-end loss itself exceeds the stop
       if (!stopped && rawPnlSh < stopLevel) {
         pnlSh = stopLevel;
         stopped = true;
@@ -234,7 +233,8 @@ function runBacktest(params) {
     if (stopped) scenario = 'stopped';
 
     monthly.push({
-      date, year, S0, S1, vix: vixRaw,
+      date, year, S0, S1, vix: +vixRaw.toFixed(2),
+      vixHigh: useReal ? +(vixForPath).toFixed(2) : null,
       K1: +K1.toFixed(2), K2: +K2.toFixed(2),
       netPrem:    +netPrem.toFixed(3),
       margPerSh:  +margPerSh.toFixed(3),
@@ -250,7 +250,10 @@ function runBacktest(params) {
       scenario,
       rfr:        +(r * 100).toFixed(2),
       breachProb: +breachProb.toFixed(2),
-      sLow:       +sLow.toFixed(1)
+      sLow:       +sLow.toFixed(1),
+      skewVal:    skewVal !== null ? +skewVal.toFixed(1) : null,
+      skewMultShort: +skewMultShortVal.toFixed(3),
+      skewMultLong:  +skewMultLongVal.toFixed(3)
     });
   }
 
@@ -291,6 +294,14 @@ function runBacktest(params) {
   const avgPremPct = traded.length
     ? +(traded.reduce((s, m) => s + m.premiumPct, 0) / traded.length).toFixed(1) : 0;
 
+  // Average SKEW for the period (real mode only)
+  const avgSKEW = (useReal && traded.length)
+    ? +(traded.filter(m => m.skewVal).reduce((s, m) => s + m.skewVal, 0) / traded.filter(m => m.skewVal).length).toFixed(1)
+    : null;
+  const avgSkewMultShort = (useReal && traded.length)
+    ? +(traded.reduce((s, m) => s + (m.skewMultShort || 0), 0) / traded.length).toFixed(2)
+    : null;
+
   return { monthly, annual,
     stats: {
       n: monthly.length, traded: traded.length, skipped: skippedMonths,
@@ -306,7 +317,8 @@ function runBacktest(params) {
       avgPremPct,
       fullLossMonths: traded.filter(m => m.scenario === 'full_loss').length,
       stoppedMonths:  traded.filter(m => m.scenario === 'stopped').length,
-      finalCap: +cap.toFixed(0), startCap
+      finalCap: +cap.toFixed(0), startCap,
+      dataSource, avgSKEW, avgSkewMultShort
     }
   };
 }
@@ -338,9 +350,10 @@ const ttBase = { backgroundColor: '#111325', borderColor: '#1c1f35', borderWidth
 
 // ── COLLECT PARAMS ──
 function getParams() {
-  const g = id => parseFloat(document.getElementById(id).value);
+  const g  = id => parseFloat(document.getElementById(id).value);
   const gi = id => parseInt(document.getElementById(id).value);
-  const rfrMode = document.getElementById('rfrMode').value;
+  const rfrMode    = document.getElementById('rfrMode').value;
+  const dataSource = document.getElementById('dataSource').value;
   return {
     shortOTMp:    g('shortOTM'),
     longOTMp:     g('longOTM'),
@@ -357,8 +370,24 @@ function getParams() {
     intraMonth:   document.getElementById('intraMonth').checked,
     startYear:    gi('startYear'),
     endYear:      gi('endYear'),
-    startCap:     g('capital')
+    startCap:     g('capital'),
+    dataSource
   };
+}
+
+// ── UPDATE SKEW CONTROL STATE ──
+function updateSkewControls() {
+  const isReal = document.getElementById('dataSource').value === 'real';
+  // Only the two skew multiplier inputs are replaced in real mode.
+  // Slippage, stop-loss, VIX floor/ceiling are independent of data source.
+  ['skewShort', 'skewLong'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.disabled = isReal;
+    el.closest('.ctrl').style.opacity = isReal ? '0.35' : '1';
+  });
+  const skewNote = document.getElementById('skewNote');
+  if (skewNote) skewNote.style.display = isReal ? 'flex' : 'none';
 }
 
 // ── STATS ──
@@ -370,15 +399,20 @@ function renderStats(s) {
     ? `${s.traded} traded · ${s.skipped} skipped`
     : `${s.traded} months traded`;
 
+  const skewInfo = s.dataSource === 'real' && s.avgSKEW
+    ? `avg SKEW ${s.avgSKEW} → ×${s.avgSkewMultShort}`
+    : `static ×${document.getElementById('skewShort').value}`;
+
   const cards = [
-    { label: 'Strategy CAGR',       value: cagrVal,                  sub: `SPY B&H: ${fmt(s.spyCagr)}`,                cls: cagrCls },
-    { label: 'Win Rate',             value: `${s.winRate}%`,          sub: `${s.wins}W · ${s.losses}L`,                cls: 'accent' },
-    { label: 'Max Drawdown',         value: `${s.maxDD}%`,            sub: 'from equity peak',                          cls: 'red' },
-    { label: 'Total Return',         value: fmt(s.totalReturn, 0),    sub: `${fmtE(s.startCap)} → ${fmtE(s.finalCap)}`,cls: s.totalReturn > 0 ? 'green' : 'red' },
-    { label: 'Avg Premium / Margin', value: `+${s.avgPremPct}%`,     sub: 'net credit ÷ margin',                       cls: 'green' },
-    { label: 'Avg Loss Month',       value: `${s.avgLoss}%`,          sub: 'on margin deployed',                        cls: 'red' },
-    { label: 'Full Loss Months',     value: String(s.fullLossMonths), sub: 'SPY through both strikes',                  cls: 'red' },
-    { label: 'Stopped Out',          value: String(s.stoppedMonths),  sub: tradeInfo,                                   cls: 'muted2' },
+    { label: 'Strategy CAGR',       value: cagrVal,                  sub: `SPY B&H: ${fmt(s.spyCagr)}`,            cls: cagrCls },
+    { label: 'Win Rate',             value: `${s.winRate}%`,          sub: `${s.wins}W · ${s.losses}L`,             cls: 'accent' },
+    { label: 'Max Drawdown',         value: `${s.maxDD}%`,            sub: 'from equity peak',                      cls: 'red' },
+    { label: 'Total Return',         value: fmt(s.totalReturn, 0),    sub: `${fmtE(s.startCap)} → ${fmtE(s.finalCap)}`, cls: s.totalReturn > 0 ? 'green' : 'red' },
+    { label: 'Avg Premium / Margin', value: `+${s.avgPremPct}%`,      sub: 'net credit ÷ margin',                   cls: 'green' },
+    { label: 'Avg Loss Month',       value: `${s.avgLoss}%`,          sub: 'on margin deployed',                    cls: 'red' },
+    { label: 'Full Loss Months',     value: String(s.fullLossMonths), sub: 'SPY through both strikes',              cls: 'red' },
+    { label: 'Skew (short put)',     value: s.dataSource === 'real' && s.avgSKEW ? `${s.avgSKEW}` : `×${document.getElementById('skewShort').value}`,
+      sub: skewInfo, cls: s.dataSource === 'real' ? 'blue' : 'muted2' },
   ];
   grid.innerHTML = cards.map((c, i) => `
     <div class="stat-card" style="animation-delay:${i * 0.025}s">
@@ -448,8 +482,9 @@ function renderMonthly(monthly) {
             `  ${lbl}: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(2)}% on margin`,
             `  Capital P&L: ${fmtER(m.dollarPnl)}  (${m.retCapPct >= 0 ? '+' : ''}${m.retCapPct.toFixed(2)}% on capital)`,
             `  SPY: ${m.S0}→${m.S1} (${fmt((m.S1 - m.S0) / m.S0 * 100, 1)})`,
-            `  VIX: ${m.vix}  |  RFR: ${m.rfr}%`
+            `  VIX: ${m.vix}${m.vixHigh ? '  peak: ' + m.vixHigh : ''}  |  RFR: ${m.rfr}%`
           ];
+          if (m.skewVal) lines.push(`  SKEW: ${m.skewVal} → ×${m.skewMultShort} / ×${m.skewMultLong}`);
           if (m.breachProb > 0.01) {
             lines.push(`  Est. low: ${m.sLow}  |  Breach prob: ${(m.breachProb * 100).toFixed(0)}%`);
           }
@@ -572,9 +607,11 @@ function run() {
     return;
   }
 
-  // Toggle fixed RFR visibility
   const rfrCtrl = document.getElementById('rfrCtrl');
   if (rfrCtrl) rfrCtrl.style.display = p.useHistRFR ? 'none' : '';
+
+  updateSkewControls();
+  updateDataBadge(p.dataSource);
 
   const result = runBacktest(p);
   if (!result) return;
@@ -591,6 +628,19 @@ function run() {
 
   const wfYears = parseInt(document.getElementById('wfYears').value) || 3;
   renderWalkForward(runWalkForward(p, wfYears));
+}
+
+// ── UPDATE DATA SOURCE BADGE ──
+function updateDataBadge(source) {
+  const badge = document.getElementById('dataBadge');
+  if (!badge) return;
+  if (source === 'real') {
+    badge.textContent = '● Real CBOE Data';
+    badge.className = 'data-badge real';
+  } else {
+    badge.textContent = '○ Simulated Data';
+    badge.className = 'data-badge sim';
+  }
 }
 
 // ── TABS ──
@@ -612,39 +662,44 @@ document.getElementById('spyToggle').addEventListener('change', () => {
   renderEquity(lastResult.monthly);
 });
 
-// ── RFR MODE TOGGLE ──
 document.getElementById('rfrMode').addEventListener('change', () => {
   const rfrCtrl = document.getElementById('rfrCtrl');
   if (rfrCtrl) rfrCtrl.style.display = document.getElementById('rfrMode').value === 'hist' ? 'none' : '';
 });
 
-// ── OPEN TRADE LOG WITH CURRENT PARAMS ──
+document.getElementById('dataSource').addEventListener('change', () => {
+  updateSkewControls();
+});
+
+// ── OPEN TRADE LOG ──
 function openTradeLog() {
   const p = getParams();
   const q = new URLSearchParams({
-    shortOTM:  p.shortOTMp,
-    longOTM:   p.longOTMp,
-    dte:       p.dteDays,
-    capital:   p.startCap,
-    marginPct: p.marginPct,
-    skewShort: p.skewShort,
-    skewLong:  p.skewLong,
-    vixFloor:  p.vixFloor,
-    vixCeil:   p.vixCeil,
-    stopLoss:  p.stopLossMult,
-    slippage:  p.slippage,
-    rfrMode:   p.useHistRFR ? 'hist' : 'fixed',
-    rfr:       p.fixedRFR,
-    intraMonth:p.intraMonth ? '1' : '0',
-    startYear: p.startYear,
-    endYear:   p.endYear,
+    shortOTM:   p.shortOTMp,
+    longOTM:    p.longOTMp,
+    dte:        p.dteDays,
+    capital:    p.startCap,
+    marginPct:  p.marginPct,
+    skewShort:  p.skewShort,
+    skewLong:   p.skewLong,
+    vixFloor:   p.vixFloor,
+    vixCeil:    p.vixCeil,
+    stopLoss:   p.stopLossMult,
+    slippage:   p.slippage,
+    rfrMode:    p.useHistRFR ? 'hist' : 'fixed',
+    rfr:        p.fixedRFR,
+    intraMonth: p.intraMonth ? '1' : '0',
+    startYear:  p.startYear,
+    endYear:    p.endYear,
+    dataSource: p.dataSource,
   });
   window.location.href = 'tradelog.html?' + q.toString();
 }
 
 // ── INIT ──
 populateYears();
-// Hide fixed RFR on load (historical is default)
 const initRfrCtrl = document.getElementById('rfrCtrl');
 if (initRfrCtrl) initRfrCtrl.style.display = 'none';
+updateSkewControls();
+updateDataBadge('real');
 run();
