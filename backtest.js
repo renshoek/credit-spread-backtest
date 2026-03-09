@@ -104,19 +104,26 @@ function runBacktest(params) {
   let spyWindowBase = null;
   let skippedMonths = 0;
 
+  // Whether real SPY daily data is available
+  const useRealSPY = useReal && SPY_REAL && SPY_SETTLE && SPY_MONTHLY_LOW;
+
   for (let i = 1; i < n; i++) {
     const yr = getYear(i);
     if (yr < startYear || yr > endYear) continue;
 
-    const S0  = SPY[i - 1];
-    const S1  = SPY[i];
+    // ── SPY prices ──
+    // Real mode: S0 = last-day adjusted close of prior month (entry)
+    //            S1 = 3rd Friday adjusted close (actual settlement)
+    // Sim mode:  both from the hardcoded monthly array
+    const S0 = useRealSPY ? SPY_REAL[i - 1] : SPY[i - 1];
+    const S1 = useRealSPY ? SPY_SETTLE[i]   : SPY[i];
 
     // ── VIX for pricing (month-end close at entry) ──
     const vixRaw = useReal ? VIX_REAL[i - 1] : VIX_SIM[i - 1];
 
     // ── VIX for intra-month path estimation ──
-    // Real mode: use actual peak VIX during the trade month (better estimate of turbulence)
-    // Sim mode: use same month-end VIX (no daily data available)
+    // Real mode: use actual peak VIX during the trade month
+    // Sim mode: use same month-end VIX
     const vixForPath = (useReal && intraMonth) ? VIX_MONTHLY_HIGH[i] : vixRaw;
 
     if (spyWindowBase === null) spyWindowBase = S0;
@@ -176,13 +183,22 @@ function runBacktest(params) {
     const netPrem    = Math.max(rawNetPrem - (slippage / 100), 0);
     const margPerSh  = Math.max((K1 - K2) - netPrem, 0.01);
 
-    // ── Intra-month path estimation ──
+    // ── Intra-month path ──
+    // Real SPY mode: use actual minimum daily low observed during the month.
+    //   breachProb is binary — the low either went below K1 or it didn't.
+    // Sim mode: estimate low via VIX-implied Brownian bridge.
     let breachProb = 0;
     let sLow = S1;
+    let actualPath = false;
 
-    if (intraMonth) {
+    if (useRealSPY && SPY_MONTHLY_LOW[i] != null) {
+      // Actual observed intra-month low from daily data
+      sLow       = SPY_MONTHLY_LOW[i];
+      actualPath = true;
+      breachProb = sLow < K1 ? 1.0 : 0.0;
+    } else if (intraMonth) {
+      // Estimated via Brownian bridge
       sLow = estimateIntraMonthLow(S0, S1, vixForPath, dteDays);
-
       if (K1 < Math.min(S0, S1)) {
         breachProb = probBreachBB(S0, S1, K1, vixForPath / 100, T);
       } else if (S1 < K1) {
@@ -197,12 +213,15 @@ function runBacktest(params) {
     else               rawPnlSh =  netPrem - (K1 - S1);
 
     // ── Stop-loss ──
+    // With actual path (real SPY): use observed intra-month low directly.
+    // With estimated path (sim): same logic but probabilistic.
     let pnlSh = rawPnlSh;
     let stopped = false;
     if (stopLossMult > 0) {
       const stopLevel = -netPrem * stopLossMult;
+      const checkPath = actualPath || intraMonth;
 
-      if (intraMonth && sLow < K1) {
+      if (checkPath && sLow < K1) {
         let worstPnl;
         if (sLow <= K2) worstPnl = -margPerSh;
         else            worstPnl = netPrem - (K1 - sLow);
@@ -251,6 +270,7 @@ function runBacktest(params) {
       rfr:        +(r * 100).toFixed(2),
       breachProb: +breachProb.toFixed(2),
       sLow:       +sLow.toFixed(1),
+      actualPath,   // true = sLow is real observed data, false = Brownian bridge estimate
       skewVal:    skewVal !== null ? +skewVal.toFixed(1) : null,
       skewMultShort: +skewMultShortVal.toFixed(3),
       skewMultLong:  +skewMultLongVal.toFixed(3)
@@ -486,7 +506,9 @@ function renderMonthly(monthly) {
           ];
           if (m.skewVal) lines.push(`  SKEW: ${m.skewVal} → ×${m.skewMultShort} / ×${m.skewMultLong}`);
           if (m.breachProb > 0.01) {
-            lines.push(`  Est. low: ${m.sLow}  |  Breach prob: ${(m.breachProb * 100).toFixed(0)}%`);
+            const lowLabel = m.actualPath ? 'Actual low' : 'Est. low';
+            const bpLabel  = m.actualPath ? (m.breachProb === 1.0 ? 'BREACHED' : 'not breached') : `Breach prob: ${(m.breachProb * 100).toFixed(0)}%`;
+            lines.push(`  ${lowLabel}: ${m.sLow}  |  ${bpLabel}`);
           }
           return lines;
         }}}

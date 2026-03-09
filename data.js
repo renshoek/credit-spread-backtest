@@ -134,6 +134,9 @@ const VIX = VIX_SIM;
 let VIX_REAL         = null;  // monthly VIX close (last trading day of each month)
 let VIX_MONTHLY_HIGH = null;  // highest daily VIX HIGH reached within each month
 let SKEW_REAL        = null;  // monthly SKEW index close
+let SPY_REAL         = null;  // monthly SPY adjusted close (last trading day — entry price)
+let SPY_SETTLE       = null;  // SPY adjusted close on 3rd Friday (actual settlement price)
+let SPY_MONTHLY_LOW  = null;  // lowest adjusted low of any day in the month (actual intra-month path)
 let REAL_DATA_LOADED = false;
 let REAL_DATA_ERROR  = null;
 
@@ -146,10 +149,26 @@ function skewToMult(otmPct, skewVal) {
 // CSV LOADER
 // ══════════════════════════════════════════════════════════════
 
-// "MM/DD/YYYY" → "YYYY-MM"
+// "MM/DD/YYYY" → "YYYY-MM"  (VIX/SKEW format)
 function _monthKey(dateStr) {
   const p = dateStr.trim().split('/');
   return p.length === 3 ? `${p[2]}-${p[0].padStart(2, '0')}` : null;
+}
+
+// "YYYY-MM-DD" → "YYYY-MM"  (SPY format)
+function _isoMonthKey(dateStr) {
+  return dateStr.trim().slice(0, 7);
+}
+
+// 3rd Friday of a given year/month as "YYYY-MM-DD"
+function _thirdFriday(year, month) {
+  // Find first day of month, walk to first Friday, add 2 weeks
+  const d = new Date(year, month - 1, 1);
+  const daysToFri = (5 - d.getDay() + 7) % 7; // getDay: Sun=0 ... Fri=5
+  const first = new Date(year, month - 1, 1 + daysToFri);
+  const third = new Date(first);
+  third.setDate(first.getDate() + 14);
+  return third.toISOString().slice(0, 10);
 }
 
 // Minimal CSV parser — returns array of {header: value} objects
@@ -177,51 +196,97 @@ function _buildMonthList() {
   return months;
 }
 
-// ── loadRealData(vixPath, skewPath) → Promise ──
-// Fetches and parses both CSVs, populates VIX_REAL / VIX_MONTHLY_HIGH / SKEW_REAL.
+// ── loadRealData(vixPath, skewPath, spyPath) → Promise ──
+// Fetches and parses all three CSVs.
+// Populates VIX_REAL, VIX_MONTHLY_HIGH, SKEW_REAL,
+//           SPY_REAL, SPY_SETTLE, SPY_MONTHLY_LOW.
 // Paths default to same directory as the HTML files.
 // Returns { ok: true } or { ok: false, error: string }.
 async function loadRealData(
   vixPath  = 'VIX_History.csv',
-  skewPath = 'SKEW_History.csv'
+  skewPath = 'SKEW_History.csv',
+  spyPath  = 'SPY.csv'
 ) {
   try {
-    const [vixResp, skewResp] = await Promise.all([
+    const [vixResp, skewResp, spyResp] = await Promise.all([
       fetch(vixPath),
-      fetch(skewPath)
+      fetch(skewPath),
+      fetch(spyPath)
     ]);
 
     if (!vixResp.ok)  throw new Error(`${vixPath}: HTTP ${vixResp.status}`);
     if (!skewResp.ok) throw new Error(`${skewPath}: HTTP ${skewResp.status}`);
+    if (!spyResp.ok)  throw new Error(`${spyPath}: HTTP ${spyResp.status}`);
 
-    const [vixText, skewText] = await Promise.all([
+    const [vixText, skewText, spyText] = await Promise.all([
       vixResp.text(),
-      skewResp.text()
+      skewResp.text(),
+      spyResp.text()
     ]);
 
     // ── Parse VIX ──
-    // Iterate all daily rows; last row seen per month = month-end close.
-    // Track running max of daily HIGHs per month.
     const vixMonthClose = {};
     const vixMonthHigh  = {};
-
     for (const row of _parseCSV(vixText)) {
       const mk = _monthKey(row.DATE);
       if (!mk) continue;
       const close = parseFloat(row.CLOSE);
       const high  = parseFloat(row.HIGH);
-      if (!isNaN(close)) vixMonthClose[mk] = close;             // last day wins
+      if (!isNaN(close)) vixMonthClose[mk] = close;
       if (!isNaN(high))  vixMonthHigh[mk]  = Math.max(vixMonthHigh[mk] || 0, high);
     }
 
     // ── Parse SKEW ──
     const skewMonthClose = {};
-
     for (const row of _parseCSV(skewText)) {
       const mk = _monthKey(row.DATE);
       if (!mk) continue;
       const val = parseFloat(row.SKEW);
-      if (!isNaN(val)) skewMonthClose[mk] = val;                // last day wins
+      if (!isNaN(val)) skewMonthClose[mk] = val;
+    }
+
+    // ── Parse SPY ──
+    // Per month: last-day adjusted close, 3rd Friday adjusted close,
+    // and minimum adjusted low (= low × adj_close / close).
+    const spyRows = _parseCSV(spyText);
+
+    // Build lookup: date → row
+    const spyByDate = {};
+    for (const row of spyRows) {
+      const close = parseFloat(row.close);
+      const adj   = parseFloat(row.adjusted_close);
+      const low   = parseFloat(row.low);
+      if (!isNaN(close) && close > 0 && !isNaN(adj) && !isNaN(low)) {
+        spyByDate[row.date.trim()] = {
+          adjClose: adj,
+          adjLow:   low * (adj / close)   // adjust the low by the same ratio
+        };
+      }
+    }
+    const spyTradingDates = new Set(Object.keys(spyByDate));
+
+    // Group by month: last adjClose, min adjLow
+    const spyMonthClose = {};   // last trading day adjClose
+    const spyMonthLow   = {};   // minimum adjLow across all days
+    for (const [dateStr, vals] of Object.entries(spyByDate)) {
+      const mk = _isoMonthKey(dateStr);
+      // Last trading day: overwrite (dates are processed in order from _parseCSV)
+      spyMonthClose[mk] = vals.adjClose;
+      if (spyMonthLow[mk] == null || vals.adjLow < spyMonthLow[mk]) {
+        spyMonthLow[mk] = vals.adjLow;
+      }
+    }
+
+    // 3rd Friday settlement: find closest prior trading day if exact date missing
+    function settleClose(year, month) {
+      const target = _thirdFriday(year, month);
+      for (let delta = 0; delta <= 3; delta++) {
+        const d = new Date(target);
+        d.setDate(d.getDate() - delta);
+        const ds = d.toISOString().slice(0, 10);
+        if (spyTradingDates.has(ds)) return spyByDate[ds].adjClose;
+      }
+      return null; // not in CSV
     }
 
     // ── Build ordered arrays ──
@@ -231,26 +296,31 @@ async function loadRealData(
     VIX_REAL         = [];
     VIX_MONTHLY_HIGH = [];
     SKEW_REAL        = [];
+    SPY_REAL         = [];
+    SPY_SETTLE       = [];
+    SPY_MONTHLY_LOW  = [];
 
     months.forEach((mk, idx) => {
+      const [y, m]  = mk.split('-').map(Number);
       const hasVix  = vixMonthClose[mk] != null;
       const hasSkew = skewMonthClose[mk] != null;
+      const hasSpy  = spyMonthClose[mk] != null;
+      const settle  = settleClose(y, m);
 
-      if (!hasVix || !hasSkew) {
-        missing.push(mk);
-        // Fallback to simulated so engine never crashes
-        VIX_REAL.push(VIX_SIM[idx] || 20);
-        VIX_MONTHLY_HIGH.push(VIX_SIM[idx] || 20);
-        SKEW_REAL.push(120);
-      } else {
-        VIX_REAL.push(Math.round(vixMonthClose[mk] * 100) / 100);
-        VIX_MONTHLY_HIGH.push(Math.round(vixMonthHigh[mk] * 100) / 100);
-        SKEW_REAL.push(Math.round(skewMonthClose[mk] * 10) / 10);
-      }
+      if (!hasVix || !hasSkew) missing.push(mk + '(vix/skew)');
+      if (!hasSpy || !settle)  missing.push(mk + '(spy)');
+
+      VIX_REAL.push(hasVix  ? Math.round(vixMonthClose[mk] * 100) / 100 : (VIX_SIM[idx] || 20));
+      VIX_MONTHLY_HIGH.push(hasVix ? Math.round(vixMonthHigh[mk]  * 100) / 100 : (VIX_SIM[idx] || 20));
+      SKEW_REAL.push(hasSkew ? Math.round(skewMonthClose[mk] * 10) / 10 : 120);
+      SPY_REAL.push(hasSpy   ? Math.round(spyMonthClose[mk] * 100) / 100 : SPY[idx]);
+      SPY_SETTLE.push(settle != null ? Math.round(settle * 100) / 100 : SPY[idx]);
+      SPY_MONTHLY_LOW.push(hasSpy ? Math.round(spyMonthLow[mk] * 100) / 100 : null);
     });
 
-    if (missing.length > 0) {
-      console.warn(`loadRealData: ${missing.length} month(s) missing — fell back to simulated:`, missing);
+    const uniqueMissing = [...new Set(missing)];
+    if (uniqueMissing.length > 0) {
+      console.warn(`loadRealData: gaps filled with fallback for:`, uniqueMissing);
     }
 
     REAL_DATA_LOADED = true;
@@ -258,14 +328,16 @@ async function loadRealData(
     console.log(
       `loadRealData OK — ${months.length} months` +
       ` | VIX ${Math.min(...VIX_REAL).toFixed(1)}–${Math.max(...VIX_REAL).toFixed(1)}` +
-      ` | SKEW ${Math.min(...SKEW_REAL).toFixed(1)}–${Math.max(...SKEW_REAL).toFixed(1)}`
+      ` | SKEW ${Math.min(...SKEW_REAL).toFixed(1)}–${Math.max(...SKEW_REAL).toFixed(1)}` +
+      ` | SPY settle ${Math.min(...SPY_SETTLE).toFixed(1)}–${Math.max(...SPY_SETTLE).toFixed(1)}`
     );
-    return { ok: true, missing };
+    return { ok: true, missing: uniqueMissing };
 
   } catch (err) {
     REAL_DATA_ERROR  = err.message;
     REAL_DATA_LOADED = false;
     VIX_REAL = VIX_MONTHLY_HIGH = SKEW_REAL = null;
+    SPY_REAL = SPY_SETTLE = SPY_MONTHLY_LOW = null;
     console.error('loadRealData failed:', err.message);
     return { ok: false, error: err.message };
   }
