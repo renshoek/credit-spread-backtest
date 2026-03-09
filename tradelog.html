@@ -81,8 +81,8 @@
           <input type="number" id="stopLoss" value="0" min="0" max="10" step="0.5">
         </div>
         <div class="ctrl">
-          <div class="ctrl-label">Slippage $</div>
-          <input type="number" id="slippage" value="1.50" min="0" max="10" step="0.25">
+          <div class="ctrl-label">Slippage $/contract</div>
+          <input type="number" id="slippage" value="5.00" min="0" max="30" step="0.50">
         </div>
       </div>
 
@@ -169,10 +169,11 @@
             <th onclick="sortBy('dd')"            title="Drawdown from equity peak">DD %</th>
             <th onclick="sortBy('sLow')"          title="Estimated intra-month SPY low (Brownian bridge)">Est. low</th>
             <th onclick="sortBy('breachProb')"    title="Estimated probability short strike breached mid-month">Breach %</th>
+            <th onclick="sortBy('pricingMode')"   title="Chain = real OptionsDX bid/ask · BS = Black-Scholes estimate">Pricing</th>
           </tr>
         </thead>
         <tbody id="tableBody">
-          <tr><td colspan="21" class="empty-state">Loading CBOE data…</td></tr>
+          <tr><td colspan="22" class="empty-state">Loading CBOE data…</td></tr>
         </tbody>
       </table>
     </div>
@@ -210,7 +211,7 @@ function loadParamsFromURL() {
   set('vixFloor',  'vixFloor',  0);
   set('vixCeil',   'vixCeil',   999);
   set('stopLoss',  'stopLoss',  0);
-  set('slippage',  'slippage',  1.50);
+  set('slippage',  'slippage',  5.00);
   set('rfr',       'rfr',       4);
   const p2 = new URLSearchParams(window.location.search);
   if (p2.get('rfrMode'))    document.getElementById('rfrMode').value    = p2.get('rfrMode');
@@ -335,7 +336,7 @@ function buildRows(data) {
   document.getElementById('rowCount').textContent = `${data.length} rows`;
 
   if (data.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="21" class="empty-state">No rows match filter</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="22" class="empty-state">No rows match filter</td></tr>`;
     return;
   }
 
@@ -344,7 +345,7 @@ function buildRows(data) {
   data.forEach(m => {
     if (m.year !== lastYear) {
       lastYear = m.year;
-      html += `<tr class="year-group"><td colspan="21">${m.year}</td></tr>`;
+      html += `<tr class="year-group"><td colspan="22">${m.year}</td></tr>`;
     }
 
     const rowCls = m.scenario === 'skipped' ? 'row-skipped' : '';
@@ -372,6 +373,10 @@ function buildRows(data) {
       : m.breachProb > 0.01
         ? `<span class="${m.breachProb > 0.5 ? 'c-red' : m.breachProb > 0.2 ? 'c-orange' : 'c-muted'}">${(m.breachProb * 100).toFixed(0)}%</span>`
         : '<span class="c-muted">—</span>';
+    const pricingCell = m.skipped ? '—'
+      : m.pricingMode === 'chain'
+        ? '<span class="c-green" style="font-size:8px;letter-spacing:0.5px">CHAIN</span>'
+        : '<span class="c-muted" style="font-size:8px;letter-spacing:0.5px">BS</span>';
 
     html += `<tr class="${rowCls}" data-scenario="${m.scenario}">
       <td>${m.date}</td>
@@ -395,6 +400,7 @@ function buildRows(data) {
       <td>${ddCell}</td>
       <td>${sLowCell}</td>
       <td>${bpCell}</td>
+      <td>${pricingCell}</td>
     </tr>`;
   });
 
@@ -482,12 +488,15 @@ document.getElementById('dataSource').addEventListener('change', () => {
   updateSkewControls();
 });
 
-// ── INIT: load CSVs, then run ──
+// ── INIT: load CSVs + options chain, then run ──
 (async () => {
   populateYears();
   loadParamsFromURL();
 
-  const result = await loadRealData();
+  const [result] = await Promise.all([
+    loadRealData(),
+    loadOptionsChain()
+  ]);
 
   if (!result.ok) {
     const sel = document.getElementById('dataSource');
