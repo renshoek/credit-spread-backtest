@@ -1,32 +1,24 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // data.js — Market data for Put Credit Spread Backtest Engine
 //
-// TWO DATA SOURCES:
+// THREE DATA SOURCES:
 //
-// SIMULATED (hardcoded, always available):
-//   SPY  — Monthly adjusted closes, Yahoo Finance / CRSP (approximated)
-//   VIX_SIM — CBOE VIX monthly closes (rounded approximations)
-//   RFR  — Effective Federal Funds Rate monthly averages, FRED (DFF)
+// 1. SIMULATED (hardcoded, always available):
+//      SPY[]      — Monthly adjusted closes (rounded approximations)
+//      VIX_SIM[]  — CBOE VIX monthly closes (rounded approximations)
+//      RFR[]      — Effective Fed Funds Rate monthly averages, FRED (DFF)
 //
-// REAL (loaded from CSV files at runtime via loadRealData()):
-//   VIX_History.csv  → VIX_REAL (monthly close) + VIX_MONTHLY_HIGH (monthly max HIGH)
-//   SKEW_History.csv → SKEW_REAL (monthly close)
+// 2. REAL VIX/SKEW/SPY (loaded from CSVs at runtime via loadRealData()):
+//      VIX_History.csv  → VIX_REAL, VIX_MONTHLY_HIGH
+//      SKEW_History.csv → SKEW_REAL
+//      SPY.csv          → SPY_REAL, SPY_SETTLE, SPY_MONTHLY_LOW
 //
-//   Expected CSV formats (CBOE standard downloads):
-//     VIX_History.csv:  DATE,OPEN,HIGH,LOW,CLOSE  (daily rows, DATE = MM/DD/YYYY)
-//     SKEW_History.csv: DATE,SKEW                 (daily rows, DATE = MM/DD/YYYY)
-//
-//   Call loadRealData() once on page load. It returns a Promise and populates
-//   VIX_REAL, VIX_MONTHLY_HIGH, SKEW_REAL once resolved.
-//
-// SKEW → Dynamic skew multiplier:
-//   skewToMult(otmPct, skewVal) = 1 + (skewVal - 100) × otmPct / 500
-//   SKEW=130, 5% OTM → ×1.30 | SKEW=130, 8% OTM → ×1.48
-//
-// REMAINING LIMITATIONS (both sources):
-//   Monthly SPY closes only — no daily OHLC for SPY.
-//   Premiums via Black-Scholes — not real options chain data.
-//   Real options data: OptionsDX.com (~$100/yr for SPY).
+// 3. REAL OPTIONS CHAIN (loaded from JSON via loadOptionsChain()):
+//      options_chain.json → OPTIONS_CHAIN
+//      Built by build_options_chain.py from OptionsDX SPY EOD files.
+//      Provides real bid/ask mid prices for 2010-01 → 2023-12.
+//      Replaces Black-Scholes pricing for covered months.
+//      For any month not in the chain, engine falls back to Black-Scholes.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DATA_START_YEAR = 2000;
@@ -140,9 +132,88 @@ let SPY_MONTHLY_LOW  = null;  // lowest adjusted low of any day in the month (ac
 let REAL_DATA_LOADED = false;
 let REAL_DATA_ERROR  = null;
 
-// ── SKEW → IV multiplier ──
+// ── REAL OPTIONS CHAIN (from options_chain.json) ──
+// Populated by loadOptionsChain(). When available, the backtest engine
+// uses real bid/ask mid prices instead of Black-Scholes for any month
+// covered. Falls back to Black-Scholes for months outside coverage.
+let OPTIONS_CHAIN = null;
+
+// Load and store the options chain JSON.
+async function loadOptionsChain(path = 'options_chain.json') {
+  try {
+    const resp = await fetch(path);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    OPTIONS_CHAIN = await resp.json();
+    const n = OPTIONS_CHAIN.meta?.months ?? Object.keys(OPTIONS_CHAIN.chain).length;
+    console.log(`Options chain loaded: ${n} months (${path})`);
+    return { ok: true, months: n };
+  } catch (err) {
+    console.warn('Options chain not loaded (will use Black-Scholes):', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+// Linear interpolation on the put chain for a given month and OTM%.
+// Returns { mid, bid, ask, iv } or null if chain not available for that month.
+//
+// The puts array is sorted by strike descending (= OTM% ascending).
+// We find the two real strikes that bracket the target OTM% and
+// linearly interpolate between them.
+function chainLookup(monthKey, otmPct) {
+  if (!OPTIONS_CHAIN) return null;
+  const entry = OPTIONS_CHAIN.chain[monthKey];
+  if (!entry || !entry.puts || entry.puts.length === 0) return null;
+
+  const puts = entry.puts;  // otm_pct ascending
+
+  let lo = null, hi = null;
+  for (const p of puts) {
+    if (p.otm_pct <= otmPct + 0.001) lo = p;
+    else { hi = p; break; }
+  }
+
+  if (!lo && !hi) return null;
+  if (!hi) return { ...lo };  // target deeper than available data — use deepest
+  if (!lo) return { ...hi };  // target shallower than available (edge case)
+
+  // Exact or close match
+  const range = hi.otm_pct - lo.otm_pct;
+  if (range < 0.001) return { ...lo };
+
+  const t = (otmPct - lo.otm_pct) / range;
+  return {
+    mid: lo.mid + t * (hi.mid - lo.mid),
+    bid: lo.bid + t * (hi.bid - lo.bid),
+    ask: lo.ask + t * (hi.ask - lo.ask),
+    iv:  (lo.iv != null && hi.iv != null) ? lo.iv + t * (hi.iv - lo.iv) : (lo.iv ?? hi.iv ?? null),
+  };
+}
+
+// ── SKEW → IV multiplier (convex / quadratic) ──
+//
+// Replaces the old linear formula (1 + (SKEW-100)×otm/500).
+// The real vol surface is convex: deeper OTM puts cost
+// disproportionately MORE than a linear skew implies.
+//
+// Model:  mult = 1 + ex·x + ½·ex²·x²
+//   where ex = (SKEW - 100) / 100   (normalised skew steepness)
+//         x  = otmPct / 5           (normalised strike distance)
+//
+// Calibration vs linear at SKEW=130:
+//   5% OTM : 1.345  (linear: 1.30)   +3.5%
+//   8% OTM : 1.595  (linear: 1.48)  +7.8%
+//
+// At SKEW=145 (elevated risk regime):
+//   5% OTM : 1.551  (linear: 1.45)   +7%
+//   8% OTM : 1.979  (linear: 1.72)  +15%
+//
+// Effect: the long put (protection leg) becomes meaningfully more
+// expensive in high-SKEW environments, reducing net credit and
+// improving accuracy vs real options market prices.
 function skewToMult(otmPct, skewVal) {
-  return 1 + (skewVal - 100) * otmPct / 500;
+  const ex = (skewVal - 100) / 100;   // normalised skew steepness
+  const x  = otmPct / 5;              // normalised strike distance
+  return 1 + ex * x + 0.5 * ex * ex * x * x;
 }
 
 // ══════════════════════════════════════════════════════════════
