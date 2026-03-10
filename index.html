@@ -97,6 +97,22 @@
           <div class="ctrl-label">Slippage $/contract</div>
           <input type="number" id="slippage" value="5.00" min="0" max="30" step="0.50">
         </div>
+        <div class="ctrl">
+          <div class="ctrl-label">Profit taker %</div>
+          <input type="number" id="profitTaker" value="0" min="0" max="100" step="5" placeholder="0=off">
+        </div>
+      </div>
+
+      <!-- Row 2b: SMA filter -->
+      <div class="controls" style="padding-top:0">
+        <label class="intra-toggle">
+          <input type="checkbox" id="smaFilter">
+          <span>SMA filter</span>
+        </label>
+        <div class="ctrl" id="smaDaysCtrl" style="display:none;min-width:80px">
+          <div class="ctrl-label">SMA days</div>
+          <input type="number" id="smaDays" value="200" min="10" max="500" step="10">
+        </div>
       </div>
 
       <!-- Skew note (real mode) -->
@@ -158,6 +174,8 @@
       <div class="ph-item ph-real"><strong>Short/Long skew &times; (Simulated mode only)</strong> — Static IV multipliers applied to VIX. 1.30/1.50 are estimates for 5%/8% OTM puts. In <strong>Real mode</strong> these are replaced by dynamic SKEW-derived values per month.</div>
       <div class="ph-item ph-real"><strong>CBOE SKEW Index (Real mode)</strong> — Measures tail-risk pricing. <code>mult = 1 + (SKEW−100) × OTM% / 500</code>. SKEW=130 at 5% OTM → ×1.30. Steepens in crashes, flattens in calm markets. Dynamic per month.</div>
       <div class="ph-item"><strong>VIX floor / ceiling</strong> — Skip months outside this range. Floor: avoid tiny-premium low-vol months. Ceiling: avoid extreme fear regimes. 0 / 999 = always trade.</div>
+      <div class="ph-item"><strong>Profit taker %</strong> — Close early when unrealized profit = N% of max profit (premium collected). 50% is the Tastytrade standard. 0 = disabled, hold to expiry. Only applied to clean wins where SPY expires above short strike — for those trades, the spread always decays through the target. Note: taking profit early reduces CAGR vs holding to expiry in most market conditions.</div>
+      <div class="ph-item"><strong>SMA filter</strong> — Skip any month where SPY's entry price is <em>below</em> its N-day simple moving average. Designed to avoid trading in sustained downtrends (e.g. 2022). Uses adjusted closes. 200-day is standard; 50-day is more reactive. Note: this is a lagging filter — it protects against the <em>next</em> month, not a crash that starts after you enter.</div>
       <div class="ph-item"><strong>Stop-loss</strong> — Three modes: <em>None</em> = always hold to expiry. <em>× credit</em> = close when unrealized loss hits N× premium collected (Tastytrade standard: 2×). <em>% of margin</em> = close when loss exceeds N% of margin deployed (e.g. 50%). <em>$ per contract</em> = close when loss exceeds a fixed dollar amount (100 shares per contract). With real SPY data, stop is triggered by actual intra-month daily lows, not estimates.</div>
       <div class="ph-item"><strong>Slippage $</strong> — Per-spread cost deducted from premium (bid-ask + commissions). $1.50–3.00 for SPY. Default $1.50 is conservative.</div>
       <div class="ph-item"><strong>Risk-free rate</strong> — Historical = actual Fed Funds Rate monthly average (FRED). Matters for Black-Scholes pricing.</div>
@@ -195,6 +213,7 @@
     <div class="tab-panel" id="panel-monthly">
       <div class="legend-row">
         <span><span style="color:var(--green)">&#9646;</span> Win (exp. worthless)</span>
+        <span><span style="color:rgba(29,218,122,0.45)">&#9646;</span> Profit taken</span>
         <span><span style="color:rgba(255,150,50,0.9)">&#9646;</span> Partial (tested, P&amp;L varies)</span>
         <span><span style="color:rgba(255,69,96,0.9)">&#9646;</span> Full max loss</span>
         <span><span style="color:rgba(255,69,96,0.55)">&#9646;</span> Stopped out</span>
@@ -316,6 +335,13 @@ function updateBanner(source, loadError) {
       Switch to <strong>Real CBOE</strong> for actual 3rd Friday prices and daily lows.</div>`;
   }
 }
+
+// ── SMA FILTER TOGGLE ──
+document.getElementById('smaFilter').addEventListener('change', function() {
+  document.getElementById('smaDaysCtrl').style.display = this.checked ? '' : 'none';
+  run();
+});
+document.getElementById('smaDays').addEventListener('input', () => run());
 
 // ── STOP-LOSS TYPE TOGGLE ──
 function updateStopLossControls() {
