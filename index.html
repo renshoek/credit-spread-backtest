@@ -343,7 +343,9 @@ function updateBanner(source, loadError) {
 // Future controls are picked up automatically as long as they have an id.
 function serializeParams() {
   const out = {};
-  document.querySelectorAll('.panel input[id], .panel select[id]').forEach(el => {
+  document.querySelectorAll('input[id], select[id]').forEach(el => {
+    // Skip year dropdowns — they're populated dynamically and always present
+    if (el.id === 'startYear' || el.id === 'endYear') return;
     if (el.type === 'checkbox') out[el.id] = el.checked;
     else if (el.value !== '')   out[el.id] = el.value;
   });
