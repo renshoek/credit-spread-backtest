@@ -130,8 +130,26 @@ let SPY_REAL          = null;
 let SPY_SETTLE        = null;   // adjusted close on 3rd Friday  (BS mode)
 let SPY_SETTLE_ACTUAL = null;   // raw (unadjusted) close on 3rd Friday (chain mode — actual option settlement price)
 let SPY_MONTHLY_LOW   = null;
+let SPY_ENTRY_DATE    = null;   // first trading day of each month (for SMA)
+let SPY_DAILY_SORTED  = null;   // [{date, adj}] sorted ascending — for SMA computation
 let REAL_DATA_LOADED  = false;
 let REAL_DATA_ERROR   = null;
+
+// ── SMA helper ──
+// Returns N-day simple moving average of SPY adj close ending at endDate (or closest prior).
+// Returns null if not enough history.
+function computeSMA(endDate, nDays) {
+  if (!SPY_DAILY_SORTED || !nDays || nDays < 1) return null;
+  // Binary-ish search for last index <= endDate
+  let idx = -1;
+  for (let i = SPY_DAILY_SORTED.length - 1; i >= 0; i--) {
+    if (SPY_DAILY_SORTED[i].date <= endDate) { idx = i; break; }
+  }
+  if (idx < nDays - 1) return null;
+  let sum = 0;
+  for (let j = idx - nDays + 1; j <= idx; j++) sum += SPY_DAILY_SORTED[j].adj;
+  return sum / nDays;
+}
 
 // ── REAL OPTIONS CHAIN (from options_chain.json) ──
 // Populated by loadOptionsChain(). When available, the backtest engine
@@ -376,6 +394,21 @@ async function loadRealData(
       return null;
     }
 
+    // ── Build SPY daily sorted array (for SMA computation) ──
+    SPY_DAILY_SORTED = Object.entries(spyByDate)
+      .map(([date, v]) => ({ date, adj: v.adjClose }))
+      .sort((a, b) => a.date < b.date ? -1 : 1);
+
+    // First trading day of a given month
+    function firstTradingDay(year, month) {
+      const mk = `${year}-${String(month).padStart(2, '0')}`;
+      for (let d = 1; d <= 31; d++) {
+        const ds = `${mk}-${String(d).padStart(2, '0')}`;
+        if (spyTradingDates.has(ds)) return ds;
+      }
+      return null;
+    }
+
     // ── Build ordered arrays ──
     const months = _buildMonthList();
     const missing = [];
@@ -387,6 +420,7 @@ async function loadRealData(
     SPY_SETTLE        = [];
     SPY_SETTLE_ACTUAL = [];
     SPY_MONTHLY_LOW   = [];
+    SPY_ENTRY_DATE    = [];
 
     months.forEach((mk, idx) => {
       const [y, m]     = mk.split('-').map(Number);
@@ -406,6 +440,7 @@ async function loadRealData(
       SPY_SETTLE.push(settle != null           ? Math.round(settle    * 100) / 100 : SPY[idx]);
       SPY_SETTLE_ACTUAL.push(settleRaw != null ? Math.round(settleRaw * 100) / 100 : (settle != null ? Math.round(settle * 100) / 100 : SPY[idx]));
       SPY_MONTHLY_LOW.push(hasSpy ? Math.round(spyMonthLow[mk] * 100) / 100 : null);
+      SPY_ENTRY_DATE.push(firstTradingDay(y, m));
     });
 
     const uniqueMissing = [...new Set(missing)];
@@ -427,7 +462,7 @@ async function loadRealData(
     REAL_DATA_ERROR  = err.message;
     REAL_DATA_LOADED = false;
     VIX_REAL = VIX_MONTHLY_HIGH = SKEW_REAL = null;
-    SPY_REAL = SPY_SETTLE = SPY_SETTLE_ACTUAL = SPY_MONTHLY_LOW = null;
+    SPY_REAL = SPY_SETTLE = SPY_SETTLE_ACTUAL = SPY_MONTHLY_LOW = SPY_ENTRY_DATE = SPY_DAILY_SORTED = null;
     console.error('loadRealData failed:', err.message);
     return { ok: false, error: err.message };
   }
