@@ -151,6 +151,8 @@
         </label>
         <button class="run-btn" onclick="run()">&#9654; Run</button>
         <button class="run-btn" style="background:transparent;border:1px solid var(--blue);color:var(--blue);" onclick="openTradeLog()">&#9776; Trade Log</button>
+        <button class="run-btn" id="copyParamsBtn" style="background:transparent;border:1px solid var(--muted);color:var(--muted2);" onclick="copyParams()" title="Copy all parameters to clipboard">&#128203; Copy Params</button>
+        <button class="run-btn" id="pasteParamsBtn" style="background:transparent;border:1px solid var(--muted);color:var(--muted2);" onclick="pasteParams()" title="Paste previously copied parameters">&#128196; Paste Params</button>
       </div>
 
     </div>
@@ -334,6 +336,72 @@ function updateBanner(source, loadError) {
       VIX values are rounded approximations. Entry/settlement use month-end closes.
       Switch to <strong>Real CBOE</strong> for actual 3rd Friday prices and daily lows.</div>`;
   }
+}
+
+// ── COPY / PASTE PARAMS ──
+// Collects every input/select/checkbox inside .panel by ID → value.
+// Future controls are picked up automatically as long as they have an id.
+function serializeParams() {
+  const out = {};
+  document.querySelectorAll('.panel input[id], .panel select[id]').forEach(el => {
+    if (el.type === 'checkbox') out[el.id] = el.checked;
+    else if (el.value !== '')   out[el.id] = el.value;
+  });
+  return out;
+}
+
+function applyParams(obj) {
+  Object.entries(obj).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = Boolean(val);
+    else el.value = val;
+  });
+  // Refresh dependent UI states
+  updateStopLossControls();
+  updateSkewControls();
+  const smaFilterEl = document.getElementById('smaFilter');
+  if (smaFilterEl) {
+    document.getElementById('smaDaysCtrl').style.display = smaFilterEl.checked ? '' : 'none';
+  }
+  const rfrCtrl = document.getElementById('rfrCtrl');
+  if (rfrCtrl) rfrCtrl.style.display = document.getElementById('rfrMode').value === 'hist' ? 'none' : '';
+  run();
+}
+
+function copyParams() {
+  const json = JSON.stringify(serializeParams());
+  navigator.clipboard.writeText(json).then(() => {
+    const btn = document.getElementById('copyParamsBtn');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '&#10003; Copied!';
+    btn.style.color = 'var(--green)';
+    btn.style.borderColor = 'var(--green)';
+    setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; btn.style.borderColor = ''; }, 1800);
+  }).catch(() => {
+    // Fallback: prompt with text
+    prompt('Copy this:', JSON.stringify(serializeParams()));
+  });
+}
+
+function pasteParams() {
+  navigator.clipboard.readText().then(text => {
+    try {
+      const obj = JSON.parse(text);
+      applyParams(obj);
+      const btn = document.getElementById('pasteParamsBtn');
+      const orig = btn.innerHTML;
+      btn.innerHTML = '&#10003; Applied!';
+      btn.style.color = 'var(--green)';
+      btn.style.borderColor = 'var(--green)';
+      setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; btn.style.borderColor = ''; }, 1800);
+    } catch(e) {
+      alert('Clipboard does not contain valid params. Copy them first using the Copy Params button.');
+    }
+  }).catch(() => {
+    const text = prompt('Paste your params JSON here:');
+    if (text) { try { applyParams(JSON.parse(text)); } catch(e) { alert('Invalid params.'); } }
+  });
 }
 
 // ── SMA FILTER TOGGLE ──
