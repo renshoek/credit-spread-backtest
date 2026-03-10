@@ -117,8 +117,8 @@ function runBacktest(params) {
     vixCeil      = 999,
     stopLossType   = 'none',
     stopLossVal    = 0,
-    profitTakerPct = 0,     // 0 = hold to expiry; 50 = close at 50% of max profit
-    smaFilter      = false, // skip month if SPY entry below N-day SMA
+    exitStrategy   = 'expiry',  // 'expiry' | 'dte21' | 'dte21_or_50pct'
+    smaFilter      = false,
     smaDays        = 200,
     slippage       = 1.50,
     useHistRFR     = true,
@@ -244,15 +244,14 @@ function runBacktest(params) {
     let shortPrem, longPrem, pricingMode;
 
     if (useChain) {
-      // ── REAL OPTIONS CHAIN PRICING ──
-      const shortLookup = chainLookup(chainKey, shortOTMp);
-      const longLookup  = chainLookup(chainKey, longOTMf);
+      // ── REAL OPTIONS CHAIN PRICING — entry snapshot ──
+      const shortLookup = chainLookup(chainKey, shortOTMp, 'entry');
+      const longLookup  = chainLookup(chainKey, longOTMf,  'entry');
 
       shortPrem      = shortLookup ? shortLookup.mid : 0;
       longPrem       = longLookup  ? longLookup.mid  : 0;
       pricingMode    = 'chain';
 
-      // IV from chain (for display/logging; not used in P&L)
       sigmaS         = shortLookup?.iv ?? null;
       sigmaL         = longLookup?.iv  ?? null;
       skewVal        = useReal ? +(SKEW_REAL[i - 1]).toFixed(1) : null;
@@ -350,18 +349,48 @@ function runBacktest(params) {
       }
     }
 
-    // ── Profit taker ──
-    // Fires when unrealized profit reaches profitTakerPct% of max profit (= netPrem).
-    // Applied only to clean wins (S1 >= K1): the spread decayed to zero at expiry,
-    // meaning it definitely crossed the profit target at some point intra-month.
-    // For partials and losses, we can't determine if the target was hit without
-    // intra-month option mark data, so we leave those unchanged.
-    // Stop-loss takes precedence: if already stopped, no profit taker.
+    // ── Early exit (21 DTE or 50% profit) ──
+    // Uses real mid prices from chain mid snapshot (~21–24 DTE remaining).
+    // Falls back to hold-to-expiry if mid data unavailable.
     let profitTaken = false;
-    if (!stopped && profitTakerPct > 0 && S1 >= K1 && netPrem > 0) {
-      const profitTarget = netPrem * (profitTakerPct / 100);
-      pnlSh = profitTarget;
-      profitTaken = true;
+    let exitedAt21  = false;
+
+    if (!stopped && useChain && exitStrategy !== 'expiry') {
+      const chainMonth  = OPTIONS_CHAIN?.chain[chainKey];
+      const hasMid      = chainMonth?.mid_date != null;
+
+      if (hasMid) {
+        // Mid prices: what the spread is worth at ~21 DTE
+        const midShort = chainLookup(chainKey, shortOTMp, 'mid');
+        const midLong  = chainLookup(chainKey, longOTMf,  'mid');
+
+        if (midShort && midLong) {
+          // Current spread cost to close at mid date (we pay this to close)
+          const midCostToClose = Math.max(midShort.mid - midLong.mid, 0);
+          // P&L if we close at mid: premium collected minus cost to close, minus extra slippage
+          const midPnl = netPrem - midCostToClose - (slippage / 100);
+
+          const hit50pct = midCostToClose <= netPrem * 0.50;
+
+          if (exitStrategy === 'dte21') {
+            // Always close at 21 DTE — use real mid price
+            pnlSh       = midPnl;
+            exitedAt21  = true;
+            profitTaken = midPnl > 0;
+          } else if (exitStrategy === 'dte21_or_50pct') {
+            // Close at 50% profit if hit, otherwise close at 21 DTE
+            if (hit50pct) {
+              pnlSh       = netPrem * 0.50 - (slippage / 100);
+              profitTaken = true;
+            } else {
+              pnlSh       = midPnl;
+              exitedAt21  = true;
+              profitTaken = midPnl > 0;
+            }
+          }
+        }
+      }
+      // If no mid data: fall through to hold-to-expiry (pnlSh unchanged)
     }
 
     const retOnMargin = pnlSh / margPerSh;
@@ -376,10 +405,11 @@ function runBacktest(params) {
     const retCapPct = retOnMargin * margFrac * 100;
 
     let scenario = S1 >= K1 ? 'win' : S1 <= K2 ? 'full_loss' : 'partial';
-    if (stopped)     scenario = 'stopped';
-    if (profitTaken) scenario = 'profit_taken';
+    if (stopped)                  scenario = 'stopped';
+    if (exitedAt21 && !stopped)   scenario = profitTaken ? 'profit_taken' : 'exited_21';
+    if (profitTaken && !exitedAt21 && !stopped) scenario = 'profit_taken';
 
-    const win        = scenario === 'win' || scenario === 'profit_taken';
+    const win = scenario === 'win' || scenario === 'profit_taken' || scenario === 'exited_21';
     const profitable = dollarPnl >= 0;
 
     monthly.push({
@@ -409,6 +439,7 @@ function runBacktest(params) {
       pricingMode,
       chainKey,
       profitTaken,
+      exitedAt21,
       smaVal: smaVal !== null ? +smaVal.toFixed(2) : null,
       smaBlocked: false
     });
@@ -481,8 +512,9 @@ function runBacktest(params) {
       fullLossMonths: traded.filter(m => m.scenario === 'full_loss').length,
       stoppedMonths:  traded.filter(m => m.scenario === 'stopped').length,
       chainMonths:    traded.filter(m => m.pricingMode === 'chain').length,
-      profitTakenMonths: traded.filter(m => m.profitTaken).length,
-      smaSkipped:     monthly.filter(m => m.smaBlocked).length,
+      profitTakenMonths: traded.filter(m => m.profitTaken && !m.exitedAt21).length,
+      exited21Months:    traded.filter(m => m.exitedAt21).length,
+      smaSkipped:        monthly.filter(m => m.smaBlocked).length,
       finalCap: +cap.toFixed(0), startCap,
       dataSource, avgSKEW, avgSkewMultShort
     }
@@ -529,11 +561,11 @@ function getParams() {
     skewLong:     g('skewLong'),
     vixFloor:     g('vixFloor'),
     vixCeil:      g('vixCeil'),
-    stopLossType:   document.getElementById('stopLossType').value,
-    stopLossVal:    g('stopLossVal') || 0,
-    profitTakerPct: g('profitTaker') || 0,
-    smaFilter:      document.getElementById('smaFilter').checked,
-    smaDays:        parseInt(document.getElementById('smaDays').value) || 200,
+    stopLossType:  document.getElementById('stopLossType').value,
+    stopLossVal:   g('stopLossVal') || 0,
+    exitStrategy:  document.getElementById('exitStrategy').value,
+    smaFilter:     document.getElementById('smaFilter').checked,
+    smaDays:       parseInt(document.getElementById('smaDays').value) || 200,
     slippage:     g('slippage'),
     useHistRFR:   rfrMode === 'hist',
     fixedRFR:     g('rfr'),
@@ -576,22 +608,27 @@ function renderStats(s) {
   const cards = [
     { label: 'Strategy CAGR',       value: cagrVal,                  sub: `SPY B&H: ${fmt(s.spyCagr)}`,            cls: cagrCls },
     { label: 'Win Rate', value: `${s.winRate}%`,
-      sub: s.profitTakenMonths > 0
-        ? `${s.wins} wins · ${s.profitTakenMonths} profit-taken · ${s.profitableRate}% profitable`
-        : `${s.wins} exp worthless · ${s.profitableRate}% profitable`,
+      sub: (() => {
+        const parts = [`${s.wins} wins`];
+        if (s.profitTakenMonths > 0) parts.push(`${s.profitTakenMonths} profit-taken`);
+        if (s.exited21Months > 0)    parts.push(`${s.exited21Months} closed@21DTE`);
+        parts.push(`${s.profitableRate}% profitable`);
+        return parts.join(' · ');
+      })(),
       cls: 'accent' },
     { label: 'Max Drawdown',         value: `${s.maxDD}%`,            sub: 'from equity peak',                      cls: 'red' },
     { label: 'Total Return',         value: fmt(s.totalReturn, 0),    sub: `${fmtE(s.startCap)} → ${fmtE(s.finalCap)} · SPY ${fmt(s.spyTotalReturn,0)}`, cls: s.totalReturn > 0 ? 'green' : 'red' },
     { label: 'Avg Premium / Margin', value: `+${s.avgPremPct}%`,      sub: 'net credit ÷ margin',                   cls: 'green' },
     { label: 'Avg Loss Month',       value: `${s.avgLoss}%`,          sub: 'on margin deployed',                    cls: 'red' },
     { label: 'Full Loss Months',     value: String(s.fullLossMonths), sub: 'SPY through both strikes',              cls: 'red' },
-    { label: 'Pricing / Filter',
+    { label: 'Pricing / Exit',
       value: s.chainMonths > 0 ? `${s.chainMonths}mo chain` : (s.dataSource === 'real' ? 'Real BS' : 'Sim BS'),
       sub: [
-        s.chainMonths > 0 ? `${s.traded - s.chainMonths}mo Black-Scholes` : skewInfo,
-        s.smaSkipped > 0  ? `${s.smaSkipped} SMA-filtered` : '',
+        s.chainMonths > 0 && (s.traded - s.chainMonths) > 0 ? `${s.traded - s.chainMonths}mo Black-Scholes` : '',
+        s.smaSkipped > 0       ? `${s.smaSkipped} SMA-filtered` : '',
         s.profitTakenMonths > 0 ? `${s.profitTakenMonths} profit-taken` : '',
-      ].filter(Boolean).join(' · ') || 'no filters active',
+        s.exited21Months > 0    ? `${s.exited21Months} closed@21DTE` : '',
+      ].filter(Boolean).join(' · ') || 'chain data · hold to expiry',
       cls: s.chainMonths > 0 ? 'green' : (s.dataSource === 'real' ? 'blue' : 'muted2') },
   ];
   grid.innerHTML = cards.map((c, i) => `
@@ -639,6 +676,7 @@ function renderMonthly(monthly) {
     if (m.scenario === 'skipped')      return 'rgba(90,95,122,0.4)';
     if (m.scenario === 'win')          return 'rgba(29,218,122,0.75)';
     if (m.scenario === 'profit_taken') return 'rgba(29,218,122,0.45)';
+    if (m.scenario === 'exited_21')    return 'rgba(29,218,122,0.30)';
     if (m.scenario === 'full_loss')    return 'rgba(255,69,96,0.9)';
     if (m.scenario === 'stopped')      return 'rgba(255,69,96,0.55)';
     return 'rgba(255,150,50,0.8)';
@@ -658,7 +696,7 @@ function renderMonthly(monthly) {
         tooltip: { ...ttBase, callbacks: { label: (c) => {
           const m = monthly[c.dataIndex];
           if (m.scenario === 'skipped') return m.smaBlocked ? `  SKIPPED — SMA filter (SPY ${m.S0} < SMA${m.smaVal})` : `  SKIPPED — VIX: ${m.vix}`;
-          const lbl = { win: 'WIN', profit_taken: 'PROFIT TAKEN', full_loss: 'FULL LOSS', partial: 'PARTIAL', stopped: 'STOPPED OUT' }[m.scenario] || m.scenario;
+          const lbl = { win: 'WIN', profit_taken: 'PROFIT TAKEN', exited_21: 'CLOSED 21 DTE', full_loss: 'FULL LOSS', partial: 'PARTIAL', stopped: 'STOPPED OUT' }[m.scenario] || m.scenario;
           const lines = [
             `  ${lbl}: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(2)}% on margin`,
             `  Capital P&L: ${fmtER(m.dollarPnl)}  (${m.retCapPct >= 0 ? '+' : ''}${m.retCapPct.toFixed(2)}% on capital)`,
@@ -777,7 +815,7 @@ function populateYears() {
     for (let y = START_YEAR; y <= END_YEAR; y++)
       el.innerHTML += `<option value="${y}">${y}</option>`;
   });
-  document.getElementById('startYear').value = START_YEAR;
+  document.getElementById('startYear').value = Math.max(START_YEAR, 2010);
   document.getElementById('endYear').value   = END_YEAR;
 }
 
@@ -867,11 +905,11 @@ function openTradeLog() {
     skewLong:   p.skewLong,
     vixFloor:   p.vixFloor,
     vixCeil:    p.vixCeil,
-    stopLossType:   p.stopLossType,
-    stopLossVal:    p.stopLossVal,
-    profitTaker:    p.profitTakerPct,
-    smaFilter:      p.smaFilter ? '1' : '0',
-    smaDays:        p.smaDays,
+    stopLossType:  p.stopLossType,
+    stopLossVal:   p.stopLossVal,
+    exitStrategy:  p.exitStrategy,
+    smaFilter:     p.smaFilter ? '1' : '0',
+    smaDays:       p.smaDays,
     slippage:   p.slippage,
     rfrMode:    p.useHistRFR ? 'hist' : 'fixed',
     rfr:        p.fixedRFR,
@@ -889,4 +927,5 @@ const initRfrCtrl = document.getElementById('rfrCtrl');
 if (initRfrCtrl) initRfrCtrl.style.display = 'none';
 updateSkewControls();
 updateDataBadge('real');
-run();
+// Don't call run() here — both index.html and tradelog.html call run()
+// from their async init blocks after data has actually loaded.
