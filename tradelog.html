@@ -77,8 +77,14 @@
           <input type="number" id="vixCeil" value="999" min="10" max="999" step="5">
         </div>
         <div class="ctrl">
-          <div class="ctrl-label">Stop-loss &times; prem</div>
-          <input type="number" id="stopLoss" value="0" min="0" max="10" step="0.5">
+          <div class="ctrl-label">Stop-loss</div>
+          <select id="stopLossType" style="width:100%;margin-bottom:4px">
+            <option value="none">None</option>
+            <option value="credit_mult">&times; credit</option>
+            <option value="margin_pct">% of margin</option>
+            <option value="dollar">$ per contract</option>
+          </select>
+          <input type="number" id="stopLossVal" value="2" min="0" step="0.5" placeholder="Value">
         </div>
         <div class="ctrl">
           <div class="ctrl-label">Slippage $/contract</div>
@@ -210,7 +216,12 @@ function loadParamsFromURL() {
   set('skewLong',  'skewLong',  1.50);
   set('vixFloor',  'vixFloor',  0);
   set('vixCeil',   'vixCeil',   999);
-  set('stopLoss',  'stopLoss',  0);
+  const slType = p.get('stopLossType') || 'none';
+  const slVal  = parseFloat(p.get('stopLossVal') || '0');
+  const slTypeEl = document.getElementById('stopLossType');
+  if (slTypeEl) slTypeEl.value = slType;
+  const slValEl = document.getElementById('stopLossVal');
+  if (slValEl) slValEl.value = slVal;
   set('slippage',  'slippage',  5.00);
   set('rfr',       'rfr',       4);
   const p2 = new URLSearchParams(window.location.search);
@@ -249,7 +260,8 @@ function getParams() {
     skewLong:     g('skewLong'),
     vixFloor:     g('vixFloor'),
     vixCeil:      g('vixCeil'),
-    stopLossMult: g('stopLoss'),
+    stopLossType: document.getElementById('stopLossType').value,
+    stopLossVal:  g('stopLossVal') || 0,
     slippage:     g('slippage'),
     useHistRFR:   document.getElementById('rfrMode').value === 'hist',
     fixedRFR:     g('rfr'),

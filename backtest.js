@@ -115,7 +115,8 @@ function runBacktest(params) {
     skewLong     = 1.50,   // used only in sim mode
     vixFloor     = 0,
     vixCeil      = 999,
-    stopLossMult = 0,
+    stopLossType = 'none',
+    stopLossVal  = 0,
     slippage     = 1.50,
     useHistRFR   = true,
     fixedRFR     = 4.0,
@@ -292,10 +293,20 @@ function runBacktest(params) {
     else               rawPnlSh =  netPrem - (K1 - S1);
 
     // ── Stop-loss ──
+    // Three modes:
+    //   credit_mult : close when loss ≥ N× net premium collected  (e.g. 2× = tastytrade)
+    //   margin_pct  : close when loss ≥ N% of margin per share     (e.g. 50%)
+    //   dollar      : close when loss ≥ $N per contract (÷100 → per share)
+    // Triggered by: actual intra-month low (real SPY) or Brownian bridge estimate (sim).
     let pnlSh = rawPnlSh;
     let stopped = false;
-    if (stopLossMult > 0) {
-      const stopLevel = -netPrem * stopLossMult;
+    const hasStop = stopLossType !== 'none' && stopLossVal > 0;
+    if (hasStop) {
+      let stopLevel;
+      if      (stopLossType === 'credit_mult') stopLevel = -netPrem   * stopLossVal;
+      else if (stopLossType === 'margin_pct')  stopLevel = -margPerSh * (stopLossVal / 100);
+      else if (stopLossType === 'dollar')      stopLevel = -(stopLossVal / 100);
+      else stopLevel = -Infinity;
       const checkPath = actualPath || intraMonth;
 
       if (checkPath && sLow < K1) {
@@ -473,7 +484,8 @@ function getParams() {
     skewLong:     g('skewLong'),
     vixFloor:     g('vixFloor'),
     vixCeil:      g('vixCeil'),
-    stopLossMult: g('stopLoss'),
+    stopLossType: document.getElementById('stopLossType').value,
+    stopLossVal:  g('stopLossVal') || 0,
     slippage:     g('slippage'),
     useHistRFR:   rfrMode === 'hist',
     fixedRFR:     g('rfr'),
@@ -800,7 +812,8 @@ function openTradeLog() {
     skewLong:   p.skewLong,
     vixFloor:   p.vixFloor,
     vixCeil:    p.vixCeil,
-    stopLoss:   p.stopLossMult,
+    stopLossType: p.stopLossType,
+    stopLossVal:  p.stopLossVal,
     slippage:   p.slippage,
     rfrMode:    p.useHistRFR ? 'hist' : 'fixed',
     rfr:        p.fixedRFR,
