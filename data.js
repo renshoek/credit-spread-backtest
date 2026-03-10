@@ -178,12 +178,29 @@ async function loadOptionsChain(path = 'options_chain.json') {
 // The puts array is sorted by strike descending (= OTM% ascending).
 // We find the two real strikes that bracket the target OTM% and
 // linearly interpolate between them.
-function chainLookup(monthKey, otmPct) {
+// chainLookup(monthKey, otmPct, snapshot)
+// snapshot: 'entry' (default) or 'mid' (~21 DTE remaining)
+// Handles both new nested format {entry:{...}, mid:{...}} and old flat format.
+function chainLookup(monthKey, otmPct, snapshot = 'entry') {
   if (!OPTIONS_CHAIN) return null;
   const entry = OPTIONS_CHAIN.chain[monthKey];
   if (!entry || !entry.puts || entry.puts.length === 0) return null;
 
-  const puts = entry.puts;  // otm_pct ascending
+  const puts = entry.puts;
+
+  // Helper: extract flat price data from a put, regardless of format
+  function extractSnap(p, snap) {
+    // New format: nested entry/mid objects
+    if (p.entry && typeof p.entry === 'object') {
+      const s = snap === 'mid' ? (p.mid || p.entry) : p.entry;
+      return { mid: s.mid, bid: s.bid, ask: s.ask, iv: s.iv };
+    }
+    // Old flat format (backward compat)
+    return { mid: p.mid, bid: p.bid, ask: p.ask, iv: p.iv };
+  }
+
+  // For 'mid' snapshot: skip puts that have no mid data, fall back to entry
+  const effectiveSnap = (snapshot === 'mid') ? 'mid' : 'entry';
 
   let lo = null, hi = null;
   for (const p of puts) {
@@ -192,19 +209,21 @@ function chainLookup(monthKey, otmPct) {
   }
 
   if (!lo && !hi) return null;
-  if (!hi) return { ...lo };  // target deeper than available data — use deepest
-  if (!lo) return { ...hi };  // target shallower than available (edge case)
+  if (!hi) { const s = extractSnap(lo, effectiveSnap); return { ...s, otm_pct: lo.otm_pct }; }
+  if (!lo) { const s = extractSnap(hi, effectiveSnap); return { ...s, otm_pct: hi.otm_pct }; }
 
-  // Exact or close match
   const range = hi.otm_pct - lo.otm_pct;
-  if (range < 0.001) return { ...lo };
+  if (range < 0.001) { const s = extractSnap(lo, effectiveSnap); return { ...s, otm_pct: lo.otm_pct }; }
 
   const t = (otmPct - lo.otm_pct) / range;
+  const loS = extractSnap(lo, effectiveSnap);
+  const hiS = extractSnap(hi, effectiveSnap);
+
   return {
-    mid: lo.mid + t * (hi.mid - lo.mid),
-    bid: lo.bid + t * (hi.bid - lo.bid),
-    ask: lo.ask + t * (hi.ask - lo.ask),
-    iv:  (lo.iv != null && hi.iv != null) ? lo.iv + t * (hi.iv - lo.iv) : (lo.iv ?? hi.iv ?? null),
+    mid: loS.mid + t * (hiS.mid - loS.mid),
+    bid: loS.bid + t * (hiS.bid - loS.bid),
+    ask: loS.ask + t * (hiS.ask - loS.ask),
+    iv:  (loS.iv != null && hiS.iv != null) ? loS.iv + t * (hiS.iv - loS.iv) : (loS.iv ?? hiS.iv ?? null),
   };
 }
 

@@ -21,123 +21,136 @@
       <a href="index.html" class="back-link" style="margin-top:10px;width:fit-content">&#8592; Back to dashboard</a>
     </div>
 
-    <div style="display:flex;flex-direction:column;gap:10px;">
+  </div>
 
-      <!-- Row 0: Data source -->
-      <div class="controls">
-        <div class="ctrl data-source-ctrl" style="min-width:160px">
-          <div class="ctrl-label">VIX &amp; Skew source</div>
-          <select id="dataSource">
-            <option value="real" selected>Real — CBOE</option>
-            <option value="sim">Simulated</option>
-          </select>
-        </div>
+  <!-- ── CONTROL PANEL ── -->
+  <div class="ctrl-panel" id="ctrlPanel">
+
+    <!-- Row 1: Core -->
+    <div class="controls">
+      <div class="ctrl data-source-ctrl">
+        <div class="ctrl-label">Source</div>
+        <select id="dataSource">
+          <option value="real" selected>Real — CBOE</option>
+          <option value="sim">Simulated</option>
+        </select>
       </div>
-
-      <!-- Row 1 -->
-      <div class="controls">
-        <div class="ctrl">
-          <div class="ctrl-label">Short OTM %</div>
-          <input type="number" id="shortOTM" value="5" min="1" max="15" step="0.5">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Long OTM %</div>
-          <input type="number" id="longOTM" value="8" min="2" max="20" step="0.5">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">DTE (days)</div>
-          <input type="number" id="dte" value="30" min="7" max="60" step="1">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Capital &euro;</div>
-          <input type="number" id="capital" value="10000" min="500" max="500000" step="500">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Margin use %</div>
-          <input type="number" id="marginPct" value="25" min="5" max="100" step="5">
-        </div>
+      <div class="ctrl">
+        <div class="ctrl-label">Short OTM %</div>
+        <input type="number" id="shortOTM" value="5" min="1" max="15" step="0.5">
       </div>
-
-      <!-- Row 2 -->
-      <div class="controls" id="skewRow">
-        <div class="ctrl">
-          <div class="ctrl-label">Short skew &times;</div>
-          <input type="number" id="skewShort" value="1.30" min="1.00" max="2.00" step="0.05">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Long skew &times;</div>
-          <input type="number" id="skewLong" value="1.50" min="1.00" max="2.50" step="0.05">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">VIX floor</div>
-          <input type="number" id="vixFloor" value="0" min="0" max="40" step="1">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">VIX ceiling</div>
-          <input type="number" id="vixCeil" value="999" min="10" max="999" step="5">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Stop-loss</div>
-          <select id="stopLossType" style="width:100%;margin-bottom:4px">
-            <option value="none">None</option>
-            <option value="credit_mult">&times; credit</option>
-            <option value="margin_pct">% of margin</option>
-            <option value="dollar">$ per contract</option>
-          </select>
-          <input type="number" id="stopLossVal" value="2" min="0" step="0.5" placeholder="Value">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Profit taker %</div>
-          <input type="number" id="profitTaker" value="0" min="0" max="100" step="5" placeholder="0=off">
-        </div>
-        <div class="ctrl">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input type="checkbox" id="smaFilter">
-            <span class="ctrl-label" style="margin:0">SMA filter</span>
-          </label>
-          <input type="number" id="smaDays" value="200" min="10" max="500" step="10" placeholder="days">
-        </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Slippage $/contract</div>
-          <input type="number" id="slippage" value="5.00" min="0" max="30" step="0.50">
-        </div>
+      <div class="ctrl">
+        <div class="ctrl-label">Long OTM %</div>
+        <input type="number" id="longOTM" value="8" min="2" max="20" step="0.5">
       </div>
-
-      <!-- Skew note -->
-      <div class="skew-note" id="skewNote">
-        <span>&#9432;</span>
-        <span>Real mode: SKEW-derived per month. Static inputs ignored.</span>
+      <div class="ctrl" title="Fixed by real chain data (~42–51 days). BS fallback uses 45.">
+        <div class="ctrl-label">DTE</div>
+        <div class="dte-display">~45 <span style="font-size:10px;opacity:0.5">(fixed)</span></div>
+        <input type="hidden" id="dte" value="45">
       </div>
-
-      <!-- Row 3 -->
-      <div class="controls">
-        <div class="ctrl" style="min-width:100px">
-          <div class="ctrl-label">Risk-free rate</div>
-          <select id="rfrMode">
-            <option value="hist" selected>Historical</option>
-            <option value="fixed">Fixed</option>
-          </select>
-        </div>
-        <div class="ctrl" id="rfrCtrl" style="min-width:80px;display:none">
-          <div class="ctrl-label">Fixed RFR %</div>
-          <input type="number" id="rfr" value="4" min="0" max="8" step="0.5">
-        </div>
-        <div class="ctrl" style="min-width:90px">
-          <div class="ctrl-label">From year</div>
-          <select id="startYear"></select>
-        </div>
-        <div class="ctrl-divider">&rarr;</div>
-        <div class="ctrl" style="min-width:90px">
-          <div class="ctrl-label">To year</div>
-          <select id="endYear"></select>
-        </div>
-        <label class="intra-toggle">
-          <input type="checkbox" id="intraMonth" checked>
-          <span>Intra-month risk</span>
-        </label>
-        <button class="run-btn" onclick="run()">&#9654; Run</button>
+      <div class="ctrl">
+        <div class="ctrl-label">Capital &euro;</div>
+        <input type="number" id="capital" value="10000" min="500" max="500000" step="500">
       </div>
+      <div class="ctrl">
+        <div class="ctrl-label">Margin %</div>
+        <input type="number" id="marginPct" value="25" min="5" max="100" step="5">
+      </div>
+    </div>
 
+    <!-- Row 2: Exit & risk -->
+    <div class="controls">
+      <div class="ctrl" style="min-width:185px">
+        <div class="ctrl-label">Exit strategy</div>
+        <select id="exitStrategy">
+          <option value="expiry">Hold to expiry (~45 DTE)</option>
+          <option value="dte21_or_50pct">50% profit OR close at 21 DTE</option>
+          <option value="dte21">Always close at 21 DTE</option>
+        </select>
+      </div>
+      <div class="ctrl" style="min-width:140px">
+        <div class="ctrl-label">Stop-loss</div>
+        <select id="stopLossType">
+          <option value="none">None</option>
+          <option value="credit_mult">&times; credit received</option>
+          <option value="margin_pct">% of margin</option>
+          <option value="dollar">$ per contract</option>
+        </select>
+      </div>
+      <div class="ctrl" id="stopLossValCtrl" style="display:none">
+        <div class="ctrl-label" id="stopLossValLabel">Value</div>
+        <input type="number" id="stopLossVal" value="2" min="0" step="0.5">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-label">Slippage $/ct</div>
+        <input type="number" id="slippage" value="3.00" min="0" max="30" step="0.50">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-label">VIX floor</div>
+        <input type="number" id="vixFloor" value="0" min="0" max="40" step="1">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-label">VIX ceil</div>
+        <input type="number" id="vixCeil" value="999" min="10" max="999" step="5">
+      </div>
+    </div>
+
+    <!-- Row 3: Sim-only skew — hidden in real mode -->
+    <div class="controls" id="skewRow" style="display:none">
+      <div class="ctrl">
+        <div class="ctrl-label">Short skew &times;</div>
+        <input type="number" id="skewShort" value="1.30" min="1.00" max="2.00" step="0.05">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-label">Long skew &times;</div>
+        <input type="number" id="skewLong" value="1.50" min="1.00" max="2.50" step="0.05">
+      </div>
+    </div>
+
+    <!-- Row 4: RFR + date range + filters + run -->
+    <div class="controls">
+      <div class="ctrl" style="min-width:100px">
+        <div class="ctrl-label">Risk-free rate</div>
+        <select id="rfrMode">
+          <option value="hist" selected>Historical</option>
+          <option value="fixed">Fixed</option>
+        </select>
+      </div>
+      <div class="ctrl" id="rfrCtrl" style="min-width:72px;display:none">
+        <div class="ctrl-label">Fixed RFR %</div>
+        <input type="number" id="rfr" value="4" min="0" max="8" step="0.5">
+      </div>
+      <div class="ctrl" style="min-width:82px">
+        <div class="ctrl-label">From year</div>
+        <select id="startYear"></select>
+      </div>
+      <div class="ctrl-divider">&rarr;</div>
+      <div class="ctrl" style="min-width:82px">
+        <div class="ctrl-label">To year</div>
+        <select id="endYear"></select>
+      </div>
+      <label class="intra-toggle">
+        <input type="checkbox" id="intraMonth" checked>
+        <span>Intra-month risk</span>
+      </label>
+      <label class="intra-toggle">
+        <input type="checkbox" id="smaFilter">
+        <span>SMA filter</span>
+      </label>
+      <div class="ctrl" id="smaDaysCtrl" style="display:none;min-width:72px">
+        <div class="ctrl-label">SMA days</div>
+        <input type="number" id="smaDays" value="200" min="10" max="500" step="10">
+      </div>
+      <button class="run-btn" onclick="run()">&#9654; Run</button>
+    </div>
+
+  </div>
+
+  <!-- ── STATUS LINE ── -->
+  <div class="accuracy-banner sim" id="accuracyBanner">
+    <div class="accuracy-icon"></div>
+    <div>Loading CBOE data…</div>
+  </div>
     </div>
   </div>
 
@@ -154,6 +167,7 @@
     <button class="filter-btn f-loss"     data-filter="full_loss" onclick="setFilter('full_loss',this)">Full Loss</button>
     <button class="filter-btn f-stopped"  data-filter="stopped"      onclick="setFilter('stopped',this)">Stopped</button>
     <button class="filter-btn f-pt"       data-filter="profit_taken" onclick="setFilter('profit_taken',this)">Profit Taken</button>
+    <button class="filter-btn f-e21"      data-filter="exited_21"   onclick="setFilter('exited_21',this)">Closed @21 DTE</button>
     <button class="filter-btn f-skipped"  data-filter="skipped"   onclick="setFilter('skipped',this)">Skipped</button>
     <div class="filter-sep"></div>
     <span style="font-family:var(--font-mono);font-size:9px;color:var(--muted2)" id="rowCount"></span>
@@ -228,9 +242,9 @@ function loadParamsFromURL() {
   set('skewLong',  'skewLong',  1.50);
   set('vixFloor',  'vixFloor',  0);
   set('vixCeil',   'vixCeil',   999);
-  // Profit taker
-  const ptEl = document.getElementById('profitTaker');
-  if (ptEl) ptEl.value = parseFloat(p.get('profitTaker') || '0');
+  // Exit strategy
+  const exitEl = document.getElementById('exitStrategy');
+  if (exitEl) exitEl.value = p.get('exitStrategy') || 'expiry';
   // SMA filter
   const smaFilterEl = document.getElementById('smaFilter');
   if (smaFilterEl) { smaFilterEl.checked = p.get('smaFilter') === '1'; }
@@ -281,11 +295,11 @@ function getParams() {
     skewLong:     g('skewLong'),
     vixFloor:     g('vixFloor'),
     vixCeil:      g('vixCeil'),
-    stopLossType:   document.getElementById('stopLossType').value,
-    stopLossVal:    g('stopLossVal') || 0,
-    profitTakerPct: g('profitTaker') || 0,
-    smaFilter:      document.getElementById('smaFilter')?.checked || false,
-    smaDays:        parseInt(document.getElementById('smaDays')?.value) || 200,
+    stopLossType:  document.getElementById('stopLossType').value,
+    stopLossVal:   g('stopLossVal') || 0,
+    exitStrategy:  document.getElementById('exitStrategy').value,
+    smaFilter:     document.getElementById('smaFilter')?.checked || false,
+    smaDays:       parseInt(document.getElementById('smaDays')?.value) || 200,
     slippage:     g('slippage'),
     useHistRFR:   document.getElementById('rfrMode').value === 'hist',
     fixedRFR:     g('rfr'),
@@ -314,6 +328,7 @@ function renderSummary(stats) {
     { label:'Full loss',    value: String(s.fullLossMonths),               cls: s.fullLossMonths > 0 ? 'c-red' : '' },
     { label:'Stopped',      value: String(s.stoppedMonths),                cls: '' },
     { label:'Profit Taken', value: String(s.profitTakenMonths || 0),         cls: '' },
+    { label:'Closed @21',   value: String(s.exited21Months || 0),            cls: '' },
     { label:'SMA Filtered', value: String(s.smaSkipped || 0),                cls: '' },
     { label:'CAGR',         value: s.cagr !== null ? fmt(s.cagr) : 'N/A', cls: s.cagr > 0 ? 'c-green' : 'c-red' },
     { label:'Total return', value: fmt(s.totalReturn, 0),                  cls: s.totalReturn > 0 ? 'c-green' : 'c-red' },
@@ -334,6 +349,7 @@ function badge(scenario) {
   const map = {
     win:          ['badge-win',     'WIN'],
     profit_taken: ['badge-pt',      'PROFIT TAKEN'],
+    exited_21:    ['badge-e21',     'CLOSED @21 DTE'],
     partial:      ['badge-partial', 'PARTIAL'],
     full_loss:    ['badge-loss',    'FULL LOSS'],
     stopped:      ['badge-stopped', 'STOPPED'],
@@ -517,17 +533,60 @@ function run() {
   buildRows(sortRows(allRows));
 }
 
-// ── EVENT LISTENERS ──
-document.getElementById('rfrMode').addEventListener('change', () => {
-  const rfrCtrl = document.getElementById('rfrCtrl');
-  if (rfrCtrl) rfrCtrl.style.display = document.getElementById('rfrMode').value === 'hist' ? 'none' : '';
-});
+// ── STOP-LOSS TYPE TOGGLE ──
+function updateStopLossControls() {
+  const t    = document.getElementById('stopLossType').value;
+  const ctrl = document.getElementById('stopLossValCtrl');
+  const lbl  = document.getElementById('stopLossValLabel');
+  const inp  = document.getElementById('stopLossVal');
+  if (t === 'none') {
+    ctrl.style.display = 'none';
+  } else {
+    ctrl.style.display = '';
+    if (t === 'credit_mult') { lbl.textContent = '× credit'; inp.step = '0.5'; inp.min = '0.5'; }
+    if (t === 'margin_pct')  { lbl.textContent = '% margin'; inp.step = '5';   inp.min = '5';   }
+    if (t === 'dollar')      { lbl.textContent = '$/contract'; inp.step = '50'; inp.min = '50'; }
+  }
+}
 
-document.getElementById('dataSource').addEventListener('change', () => {
-  updateSkewControls();
+// ── SINGLE DEBOUNCED AUTO-UPDATE ──
+let _autoRunTimer = null;
+function scheduleRun() {
+  clearTimeout(_autoRunTimer);
+  _autoRunTimer = setTimeout(run, 120);
+}
+document.getElementById('ctrlPanel').addEventListener('change', function(e) {
+  const id = e.target.id;
+  if (id === 'dataSource') { lockYearRange(); updateSkewControls(); }
+  if (id === 'stopLossType') updateStopLossControls();
+  if (id === 'smaFilter') {
+    document.getElementById('smaDaysCtrl').style.display = e.target.checked ? '' : 'none';
+  }
+  if (id === 'rfrMode') {
+    const rfrCtrl = document.getElementById('rfrCtrl');
+    if (rfrCtrl) rfrCtrl.style.display = e.target.value === 'fixed' ? '' : 'none';
+  }
+  scheduleRun();
+});
+document.getElementById('ctrlPanel').addEventListener('input', function() {
+  scheduleRun();
 });
 
 // ── INIT: load CSVs + options chain, then run ──
+function lockYearRange() {
+  const startEl = document.getElementById('startYear');
+  const dataEl  = document.getElementById('dataSource');
+  if (!startEl || !dataEl) return;
+  const isReal = dataEl.value === 'real';
+  Array.from(startEl.options).forEach(opt => {
+    const yr = parseInt(opt.value);
+    opt.disabled = isReal && yr < 2010;
+    if (isReal && yr < 2010 && startEl.value == opt.value) {
+      startEl.value = '2010';
+    }
+  });
+}
+
 (async () => {
   populateYears();
   loadParamsFromURL();
@@ -544,12 +603,25 @@ document.getElementById('dataSource').addEventListener('change', () => {
     const badge = document.getElementById('dataBadge');
     badge.textContent = '⚠ CSV load failed — Simulated mode';
     badge.className = 'data-badge sim';
+    const banner = document.getElementById('accuracyBanner');
+    if (banner) { banner.className='accuracy-banner sim'; banner.innerHTML='<div class="accuracy-icon"></div><div>CSV load failed — <strong>simulated mode</strong></div>'; }
   } else {
     updateDataBadge(document.getElementById('dataSource').value);
+    const chainLoaded = OPTIONS_CHAIN != null;
+    const chainMonths = chainLoaded ? (OPTIONS_CHAIN.meta?.months ?? 0) : 0;
+    const banner = document.getElementById('accuracyBanner');
+    if (banner) {
+      banner.className = 'accuracy-banner real';
+      banner.innerHTML = chainLoaded
+        ? `<div class="accuracy-icon"></div><div><strong>Real chain</strong> — ${chainMonths} months OptionsDX 2010–2023 · real bid/ask mid · daily SPY lows</div>`
+        : `<div class="accuracy-icon"></div><div><strong>Real CBOE</strong> — 3rd Friday entry/settlement · daily lows · premiums via Black-Scholes</div>`;
+    }
   }
 
   updateSkewControls();
+  lockYearRange();
   run();
+  setTimeout(() => Object.values(charts).forEach(c => c && c.resize()), 100);
 })();
 </script>
 </body>
