@@ -80,9 +80,18 @@
           <div class="ctrl-label">VIX ceiling</div>
           <input type="number" id="vixCeil" value="999" min="10" max="999" step="5">
         </div>
-        <div class="ctrl">
-          <div class="ctrl-label">Stop-loss &times; prem</div>
-          <input type="number" id="stopLoss" value="0" min="0" max="10" step="0.5">
+        <div class="ctrl" style="min-width:150px">
+          <div class="ctrl-label">Stop-loss type</div>
+          <select id="stopLossType" style="width:100%">
+            <option value="none">None (hold to expiry)</option>
+            <option value="credit_mult">&times; credit received</option>
+            <option value="margin_pct">% of margin</option>
+            <option value="dollar">$ per contract</option>
+          </select>
+        </div>
+        <div class="ctrl" id="stopLossValCtrl" style="display:none">
+          <div class="ctrl-label" id="stopLossValLabel">Value</div>
+          <input type="number" id="stopLossVal" value="2" min="0" step="0.5">
         </div>
         <div class="ctrl">
           <div class="ctrl-label">Slippage $/contract</div>
@@ -149,7 +158,7 @@
       <div class="ph-item ph-real"><strong>Short/Long skew &times; (Simulated mode only)</strong> — Static IV multipliers applied to VIX. 1.30/1.50 are estimates for 5%/8% OTM puts. In <strong>Real mode</strong> these are replaced by dynamic SKEW-derived values per month.</div>
       <div class="ph-item ph-real"><strong>CBOE SKEW Index (Real mode)</strong> — Measures tail-risk pricing. <code>mult = 1 + (SKEW−100) × OTM% / 500</code>. SKEW=130 at 5% OTM → ×1.30. Steepens in crashes, flattens in calm markets. Dynamic per month.</div>
       <div class="ph-item"><strong>VIX floor / ceiling</strong> — Skip months outside this range. Floor: avoid tiny-premium low-vol months. Ceiling: avoid extreme fear regimes. 0 / 999 = always trade.</div>
-      <div class="ph-item"><strong>Stop-loss &times; prem</strong> — Close early if loss ≥ this multiple of premium collected. 0 = hold to expiry. Tastytrade standard: 2×. With real SPY data, triggered by actual intra-month daily lows.</div>
+      <div class="ph-item"><strong>Stop-loss</strong> — Three modes: <em>None</em> = always hold to expiry. <em>× credit</em> = close when unrealized loss hits N× premium collected (Tastytrade standard: 2×). <em>% of margin</em> = close when loss exceeds N% of margin deployed (e.g. 50%). <em>$ per contract</em> = close when loss exceeds a fixed dollar amount (100 shares per contract). With real SPY data, stop is triggered by actual intra-month daily lows, not estimates.</div>
       <div class="ph-item"><strong>Slippage $</strong> — Per-spread cost deducted from premium (bid-ask + commissions). $1.50–3.00 for SPY. Default $1.50 is conservative.</div>
       <div class="ph-item"><strong>Risk-free rate</strong> — Historical = actual Fed Funds Rate monthly average (FRED). Matters for Black-Scholes pricing.</div>
       <div class="ph-item"><strong>Win rate definition</strong> — <strong>Expired worthless</strong>: S1 ≥ K1 (full premium retained). NOT dollarPnl ≥ 0. Months where SPY dips slightly below K1 but the loss is less than premium collected are classified as "partial" and counted as losses. This matches industry convention and avoids win rate inflation from small-breach months.</div>
@@ -307,6 +316,24 @@ function updateBanner(source, loadError) {
       Switch to <strong>Real CBOE</strong> for actual 3rd Friday prices and daily lows.</div>`;
   }
 }
+
+// ── STOP-LOSS TYPE TOGGLE ──
+function updateStopLossControls() {
+  const t    = document.getElementById('stopLossType').value;
+  const ctrl = document.getElementById('stopLossValCtrl');
+  const lbl  = document.getElementById('stopLossValLabel');
+  const inp  = document.getElementById('stopLossVal');
+  if (t === 'none') {
+    ctrl.style.display = 'none';
+  } else {
+    ctrl.style.display = '';
+    if (t === 'credit_mult') { lbl.textContent = '× credit'; inp.step = '0.5'; inp.min = '0.5'; inp.value = inp.value || '2'; }
+    if (t === 'margin_pct')  { lbl.textContent = '% of margin'; inp.step = '5'; inp.min = '5'; inp.value = inp.value || '50'; }
+    if (t === 'dollar')      { lbl.textContent = '$ per contract'; inp.step = '50'; inp.min = '50'; inp.value = inp.value || '200'; }
+  }
+}
+document.getElementById('stopLossType').addEventListener('change', () => { updateStopLossControls(); run(); });
+document.getElementById('stopLossVal') .addEventListener('input',  () => run());
 
 document.getElementById('dataSource').addEventListener('change', function () {
   updateSkewControls();
