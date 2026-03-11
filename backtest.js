@@ -937,7 +937,7 @@ function populateYears() {
       el.innerHTML += `<option value="${y}">${y}</option>`;
   });
   document.getElementById('startYear').value = Math.max(START_YEAR, 2010);
-  document.getElementById('endYear').value   = END_YEAR;
+  document.getElementById('endYear').value   = 2023;
 }
 
 // ── MAIN RUN ──
