@@ -195,23 +195,24 @@ function runBacktest(params) {
     // VIX filter
     if (vixRaw < vixFloor || vixRaw > vixCeil || smaBlocked) {
       skippedMonths++;
-      // Idle capital earns the risk-free rate (T-bill equivalent).
-      // Without this, filtered months earn 0% which understates strategy returns.
-      const rfrSkip      = useHistRFR ? (RFR[i - 1] / 100) : (fixedRFR / 100);
-      const rfrMonthly   = rfrSkip / 12;               // annualised → monthly
-      const rfrDollar    = cap * rfrMonthly;
-      cap               += rfrDollar;
+      // Idle capital earns risk-free rate (T-bill equivalent)
+      const rfrSkip    = useHistRFR ? (RFR[i - 1] / 100) : (fixedRFR / 100);
+      const rfrMonthly = rfrSkip / 12;
+      const rfrDollar  = cap * rfrMonthly;
+      cap             += rfrDollar;
       if (cap > peak) peak = cap;
       const spyBnH = startCap * (S1_adj / spyWindowBase);
       monthly.push({
         date, year, S0, S1: S1_adj, vix: +vixRaw.toFixed(2),
         skipped: true,
-        retPct: +(rfrMonthly * 100).toFixed(3),        // small positive RFR return
+        retPct:    +(rfrMonthly * 100).toFixed(3),
         retCapPct: +(rfrMonthly * 100).toFixed(3),
         dollarPnl: +rfrDollar.toFixed(2),
         cap: +cap.toFixed(2), spyBnH: +spyBnH.toFixed(2),
+        marginDeployed: 0,
+        freeCap: +cap.toFixed(2),
         dd: peak > 0 ? +((cap - peak) / peak * 100).toFixed(2) : 0,
-        win: false, scenario: 'skipped',
+        win: false, outcome: 'loss', exitType: null, scenario: 'skipped',
         rfr: +(rfrSkip * 100).toFixed(2), breachProb: 0, sLow: 0,
         skewVal: useReal ? +(SKEW_REAL[i - 1]).toFixed(1) : null,
         skewMultShort: null, skewMultLong: null,
@@ -364,43 +365,51 @@ function runBacktest(params) {
     let profitTaken = false;
     let exitedAt21  = false;
 
+    // Dates for this trade (from chain or fallback)
+    const chainMeta  = useChain ? OPTIONS_CHAIN?.chain[chainKey] : null;
+    const entryDate  = chainMeta?.entry_date  ?? (SPY_ENTRY_DATE ? SPY_ENTRY_DATE[i - 1] : null);
+    const expiryDate = chainMeta?.expiry_date ?? null;
+    const midDate    = chainMeta?.mid_date    ?? null;
+
+    // vixEntry: VIX on actual entry date (fixes look-ahead bias vs prior month-end VIX)
+    const vixEntry = (VIX_DAILY && entryDate && VIX_DAILY[entryDate] != null)
+      ? VIX_DAILY[entryDate]
+      : vixRaw;  // fallback to prior month-end
+
     if (!stopped && useChain && exitStrategy !== 'expiry') {
       const chainMonth  = OPTIONS_CHAIN?.chain[chainKey];
       const hasMid      = chainMonth?.mid_date != null;
 
       if (hasMid) {
-        // Mid prices: what the spread is worth at ~21 DTE
         const midShort = chainLookup(chainKey, shortOTMp, 'mid');
         const midLong  = chainLookup(chainKey, longOTMf,  'mid');
 
         if (midShort && midLong) {
-          // Current spread cost to close at mid date (we pay this to close)
           const midCostToClose = Math.max(midShort.mid - midLong.mid, 0);
-          // P&L if we close at mid: premium collected minus cost to close, minus extra slippage
           const midPnl = netPrem - midCostToClose - (slippage / 100);
-
           const hit50pct = midCostToClose <= netPrem * 0.50;
 
           if (exitStrategy === 'dte21') {
-            // Always close at 21 DTE — use real mid price
-            pnlSh       = midPnl;
-            exitedAt21  = true;
-            profitTaken = midPnl > 0;
+            pnlSh      = midPnl;
+            exitedAt21 = true;
+            // profitTaken stays false — exit reason is time, not profit target
           } else if (exitStrategy === 'dte21_or_50pct') {
-            // Close at 50% profit if hit, otherwise close at 21 DTE
             if (hit50pct) {
               pnlSh       = netPrem * 0.50 - (slippage / 100);
               profitTaken = true;
             } else {
-              pnlSh       = midPnl;
-              exitedAt21  = true;
-              profitTaken = midPnl > 0;
+              pnlSh      = midPnl;
+              exitedAt21 = true;
+              // profitTaken stays false — this is the time stop leg
             }
           }
         }
       }
       // If no mid data: fall through to hold-to-expiry (pnlSh unchanged)
     }
+
+    // closeDate: when the trade was actually closed
+    const closeDate = (exitedAt21 || profitTaken) ? (midDate ?? expiryDate) : expiryDate;
 
     const retOnMargin = pnlSh / margPerSh;
     const dollarPnl   = retOnMargin * Math.abs(cap) * margFrac;
@@ -413,13 +422,27 @@ function runBacktest(params) {
     const retPct    = retOnMargin * 100;
     const retCapPct = retOnMargin * margFrac * 100;
 
-    let scenario = S1 >= K1 ? 'win' : S1 <= K2 ? 'full_loss' : 'partial';
-    if (stopped)                  scenario = 'stopped';
-    if (exitedAt21 && !stopped)   scenario = profitTaken ? 'profit_taken' : 'exited_21';
-    if (profitTaken && !exitedAt21 && !stopped) scenario = 'profit_taken';
+    // exitType: HOW the trade was closed (independent of P&L)
+    let exitType;
+    if (stopped)           exitType = 'stopped';
+    else if (profitTaken)  exitType = 'profit_target';
+    else if (exitedAt21)   exitType = 'dte21';
+    else if (S1 >= K1)     exitType = 'expiry_win';
+    else if (S1 <= K2)     exitType = 'expiry_full';
+    else                   exitType = 'expiry_partial';
 
-    const win = scenario === 'win' || scenario === 'profit_taken' || scenario === 'exited_21';
+    // outcome: WIN or LOSS — purely P&L based (wins + losses = traded always)
     const profitable = dollarPnl >= 0;
+    const outcome    = profitable ? 'win' : 'loss';
+    const win        = profitable;  // alias
+
+    // scenario: derived for chart colour compatibility
+    const scenario = exitType === 'stopped'        ? 'stopped'
+                   : exitType === 'profit_target'  ? 'profit_taken'
+                   : exitType === 'dte21'           ? 'exited_21'
+                   : exitType === 'expiry_win'      ? 'win'
+                   : exitType === 'expiry_full'     ? 'full_loss'
+                   :                                  'partial';
 
     monthly.push({
       date, year, S0, S1, vix: +vixRaw.toFixed(2),
@@ -432,12 +455,17 @@ function runBacktest(params) {
       retCapPct:  +retCapPct.toFixed(3),
       dollarPnl:  +dollarPnl.toFixed(2),
       cap:        +cap.toFixed(2),
+      marginDeployed: +Math.abs((cap - dollarPnl) * margFrac).toFixed(2),  // margin locked at entry
+      freeCap:        +(cap * (1 - margFrac)).toFixed(2),                  // capital not in margin
       spyBnH:     +spyBnH.toFixed(2),
       dd:         +dd.toFixed(2),
-      win,
-      profitable,
+      outcome,       // 'win'|'loss' — P&L based; wins+losses=traded
+      exitType,      // 'expiry_win'|'expiry_partial'|'expiry_full'|'dte21'|'profit_target'|'stopped'
+      win, profitable,  // aliases for outcome==='win'
       skipped:    false,
-      scenario,
+      scenario,   // derived from exitType, kept for chart colours
+      entryDate, expiryDate, closeDate,
+      vixEntry:   +vixEntry.toFixed(2),
       rfr:        +(r * 100).toFixed(2),
       breachProb: +breachProb.toFixed(2),
       sLow:       +sLow.toFixed(1),
@@ -481,7 +509,7 @@ function runBacktest(params) {
 
   const traded         = monthly.filter(m => !m.skipped);
   const wins           = traded.filter(m => m.profitable);    // positive P&L (primary win metric)
-  const worthless      = traded.filter(m => m.scenario === 'win'); // expired worthless (subset)
+  const worthless      = traded.filter(m => m.exitType === 'expiry_win'); // expired worthless
   const profitable     = wins;                                // alias
   const losses         = traded.filter(m => !m.profitable);   // negative P&L
   const yrs            = monthly.length / 12;
@@ -504,29 +532,18 @@ function runBacktest(params) {
     : null;
 
   // ── Sharpe ratio ──
-  // Monthly excess returns (strategy return minus risk-free rate for that month).
-  // Annualised: (mean_excess / std_excess) × sqrt(12).
-  // Uses ALL months (traded + skipped) so idle RFR months count as ~0 excess.
-  const allReturns = monthly.map(m => m.retCapPct / 100);  // monthly return on capital
-  const rfrMonthly = monthly.map((m, i) => {
-    const rfrAnn = useHistRFR ? (RFR[i] || 0) / 100 : fixedRFR / 100;
-    return rfrAnn / 12;
-  });
-  const excessReturns = allReturns.map((r, i) => r - rfrMonthly[i]);
-  const meanExcess    = excessReturns.reduce((s, x) => s + x, 0) / excessReturns.length;
-  const variance      = excessReturns.reduce((s, x) => s + (x - meanExcess) ** 2, 0) / excessReturns.length;
-  const stdExcess     = Math.sqrt(variance);
-  const sharpe        = stdExcess > 0 ? +((meanExcess / stdExcess) * Math.sqrt(12)).toFixed(2) : null;
+  const allRetsCap  = monthly.map(m => (m.retCapPct ?? 0) / 100);
+  const rfrMonthArr = monthly.map((_, i) => ((useHistRFR ? (RFR[i] || 0) : fixedRFR) / 100) / 12);
+  const excessRets  = allRetsCap.map((r, i) => r - rfrMonthArr[i]);
+  const meanEx      = excessRets.reduce((s, x) => s + x, 0) / excessRets.length;
+  const stdEx       = Math.sqrt(excessRets.reduce((s, x) => s + (x - meanEx) ** 2, 0) / excessRets.length);
+  const sharpe      = stdEx > 0 ? +((meanEx / stdEx) * Math.sqrt(12)).toFixed(2) : null;
 
-  // SPY Sharpe for comparison
-  const spyMonthlyRets = monthly.map((m, i) => {
-    const prevBnH = i === 0 ? startCap : monthly[i - 1].spyBnH;
-    return (m.spyBnH - prevBnH) / prevBnH;
-  });
-  const spyExcess = spyMonthlyRets.map((r, i) => r - rfrMonthly[i]);
+  const spyRets   = monthly.map((m, i) => (i === 0 ? 0 : (m.spyBnH - monthly[i-1].spyBnH) / monthly[i-1].spyBnH));
+  const spyExcess = spyRets.map((r, i) => r - rfrMonthArr[i]);
   const spyMeanEx = spyExcess.reduce((s, x) => s + x, 0) / spyExcess.length;
-  const spyVar    = spyExcess.reduce((s, x) => s + (x - spyMeanEx) ** 2, 0) / spyExcess.length;
-  const spySharpe = Math.sqrt(spyVar) > 0 ? +((spyMeanEx / Math.sqrt(spyVar)) * Math.sqrt(12)).toFixed(2) : null;
+  const spyStdEx  = Math.sqrt(spyExcess.reduce((s, x) => s + (x - spyMeanEx) ** 2, 0) / spyExcess.length);
+  const spySharpe = spyStdEx > 0 ? +((spyMeanEx / spyStdEx) * Math.sqrt(12)).toFixed(2) : null;
 
   return { monthly, annual,
     stats: {
@@ -655,8 +672,8 @@ function renderStats(s) {
     { label: 'Max Drawdown',         value: `${s.maxDD}%`,            sub: 'from equity peak',                      cls: 'red' },
     { label: 'Sharpe Ratio',
       value: s.sharpe !== null ? String(s.sharpe) : 'N/A',
-      sub: s.spySharpe !== null ? `SPY: ${s.spySharpe}` : 'annualised, vs RFR',
-      cls: s.sharpe !== null ? (s.sharpe >= 1 ? 'green' : s.sharpe >= 0.5 ? 'accent' : s.sharpe < 0 ? 'red' : '') : '' },
+      sub:   s.spySharpe !== null ? `SPY: ${s.spySharpe}` : 'annualised vs RFR',
+      cls:   s.sharpe >= 1 ? 'green' : s.sharpe >= 0.5 ? 'accent' : s.sharpe < 0 ? 'red' : '' },
     { label: 'Total Return',         value: fmt(s.totalReturn, 0),    sub: `${fmtE(s.startCap)} → ${fmtE(s.finalCap)} · SPY ${fmt(s.spyTotalReturn,0)}`, cls: s.totalReturn > 0 ? 'green' : 'red' },
     { label: 'Avg Premium / Margin', value: `+${s.avgPremPct}%`,      sub: 'net credit ÷ margin',                   cls: 'green' },
     { label: 'Avg Loss Month',       value: `${s.avgLoss}%`,          sub: 'on margin deployed',                    cls: 'red' },
@@ -801,6 +818,70 @@ function renderAnnualGrid(annual) {
     </div>`).join('');
 }
 
+function updateCapitalSummary(monthly) {
+  const el = document.getElementById('capitalSummary');
+  if (!el) return;
+  const traded = monthly.filter(m => !m.skipped);
+  const avgMarginPct = traded.length
+    ? traded.reduce((s, m) => s + (m.marginDeployed / m.cap * 100), 0) / traded.length
+    : 0;
+  const maxMargin = Math.max(...monthly.map(m => m.marginDeployed ?? 0));
+  const maxCap    = Math.max(...monthly.map(m => m.cap));
+  el.textContent = `Avg margin deployed: ${avgMarginPct.toFixed(1)}% of capital  ·  Peak margin: €${Math.round(maxMargin).toLocaleString()}`;
+}
+
+function renderCapital(monthly) {
+  const ctx = document.getElementById('chartCapital').getContext('2d');
+  // Stacked area: margin in use (bottom) + free capital (top)
+  charts.capital = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: monthly.map(m => m.date),
+      datasets: [
+        {
+          label: 'Margin in use',
+          data: monthly.map(m => m.marginDeployed ?? 0),
+          borderColor: 'rgba(255,100,80,0.8)',
+          backgroundColor: 'rgba(255,100,80,0.18)',
+          borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3,
+          stack: 'cap'
+        },
+        {
+          label: 'Free capital',
+          data: monthly.map(m => m.freeCap ?? m.cap),
+          borderColor: 'rgba(29,218,122,0.8)',
+          backgroundColor: 'rgba(29,218,122,0.15)',
+          borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3,
+          stack: 'cap'
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: { duration: 600 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: true, labels: { color: '#5a5f7a', boxWidth: 14, font: { size: 9 } } },
+        tooltip: {
+          ...ttBase,
+          callbacks: {
+            label: c => `  ${c.dataset.label}: ${fmtER(c.parsed.y)}`,
+            footer: items => {
+              const total = items.reduce((s, i) => s + i.parsed.y, 0);
+              const m = monthly[items[0].dataIndex];
+              const pct = (m.marginDeployed / (m.cap || 1) * 100).toFixed(0);
+              return `  Total: ${fmtER(total)}  (${pct}% in margin)`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid: gridOpts(), ticks: { ...tickOpts(), maxTicksLimit: 10 }, stacked: true },
+        y: { grid: gridOpts(), ticks: { ...tickOpts(), callback: v => '€' + Math.round(v / 1000) + 'k' }, stacked: true }
+      }
+    }
+  });
+}
+
 function renderDrawdown(monthly) {
   const ctx = document.getElementById('chartDrawdown').getContext('2d');
   charts.drawdown = new Chart(ctx, {
@@ -886,6 +967,8 @@ function run() {
   renderAnnual(annual);
   renderAnnualGrid(annual);
   renderDrawdown(monthly);
+  renderCapital(monthly);
+  updateCapitalSummary(monthly);
 
   const wfYears = parseInt(document.getElementById('wfYears').value) || 3;
   renderWalkForward(runWalkForward(p, wfYears));
@@ -913,6 +996,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.add('active');
     document.getElementById('panel-' + tab).classList.add('active');
     document.getElementById('spyToggleWrap').style.display = tab === 'equity' ? 'flex' : 'none';
+    // Update capital summary line when tab is activated
+    if (tab === 'capital' && lastResult) updateCapitalSummary(lastResult.monthly);
     setTimeout(() => Object.values(charts).forEach(c => c && c.resize()), 10);
   });
 });
@@ -921,6 +1006,7 @@ document.getElementById('spyToggle').addEventListener('change', () => {
   if (!lastResult) return;
   if (charts.equity) charts.equity.destroy();
   renderEquity(lastResult.monthly);
+  if (charts.capital) { charts.capital.destroy(); renderCapital(lastResult.monthly); }
 });
 
 document.getElementById('rfrMode').addEventListener('change', () => {

@@ -161,14 +161,16 @@
 
   <!-- ── FILTER BAR ── -->
   <div class="filter-bar">
-    <button class="filter-btn active" data-filter="all"       onclick="setFilter('all',this)">All</button>
-    <button class="filter-btn f-win"      data-filter="win"       onclick="setFilter('win',this)">Win</button>
-    <button class="filter-btn f-partial"  data-filter="partial"   onclick="setFilter('partial',this)">Partial</button>
-    <button class="filter-btn f-loss"     data-filter="full_loss" onclick="setFilter('full_loss',this)">Full Loss</button>
-    <button class="filter-btn f-stopped"  data-filter="stopped"      onclick="setFilter('stopped',this)">Stopped</button>
-    <button class="filter-btn f-pt"       data-filter="profit_taken" onclick="setFilter('profit_taken',this)">Profit Taken</button>
-    <button class="filter-btn f-e21"      data-filter="exited_21"   onclick="setFilter('exited_21',this)">Closed @21 DTE</button>
-    <button class="filter-btn f-skipped"  data-filter="skipped"   onclick="setFilter('skipped',this)">Skipped</button>
+    <button class="filter-btn active"   data-filter="all"           onclick="setFilter('all',this)">All</button>
+    <button class="filter-btn f-win"     data-filter="win"           onclick="setFilter('win',this)">Win</button>
+    <button class="filter-btn f-loss"    data-filter="loss"          onclick="setFilter('loss',this)">Loss</button>
+    <button class="filter-btn f-skipped" data-filter="skipped"       onclick="setFilter('skipped',this)">Skipped</button>
+    <span class="filter-sep">|</span>
+    <button class="filter-btn f-e21"     data-filter="dte21"         onclick="setFilter('dte21',this)">21 DTE</button>
+    <button class="filter-btn f-pt"      data-filter="profit_target" onclick="setFilter('profit_target',this)">50% Target</button>
+    <button class="filter-btn f-partial" data-filter="expiry_partial" onclick="setFilter('expiry_partial',this)">Partial</button>
+    <button class="filter-btn f-loss"    data-filter="expiry_full"   onclick="setFilter('expiry_full',this)">Full Loss</button>
+    <button class="filter-btn f-stopped" data-filter="stopped"       onclick="setFilter('stopped',this)">Stopped</button>
     <div class="filter-sep"></div>
     <span style="font-family:var(--font-mono);font-size:9px;color:var(--muted2)" id="rowCount"></span>
     <button class="csv-btn" onclick="exportCSV()">&#8659; CSV</button>
@@ -181,8 +183,13 @@
         <thead>
           <tr>
             <th onclick="sortBy('date')"          title="Month">Month</th>
-            <th onclick="sortBy('scenario')"      title="Outcome">Outcome</th>
-            <th onclick="sortBy('vix')"           title="VIX close at entry (prior month-end)">VIX</th>
+            <th onclick="sortBy('outcome')"       title="Win or Loss based on P&amp;L">W/L</th>
+            <th onclick="sortBy('exitType')"      title="How/why the trade was closed">Exit type</th>
+            <th onclick="sortBy('entryDate')"     title="Date trade was opened">Entry</th>
+            <th onclick="sortBy('closeDate')"     title="Date trade was closed">Close</th>
+            <th onclick="sortBy('expiryDate')"    title="Options expiry date (3rd Friday)">Expiry</th>
+            <th onclick="sortBy('vixEntry')"      title="VIX on actual entry date">VIX entry</th>
+            <th onclick="sortBy('vix')"           title="VIX close at prior month-end">VIX prev</th>
             <th onclick="sortBy('vixHigh')"       title="Highest VIX daily HIGH during the trade month (real mode only)">VIX peak</th>
             <th onclick="sortBy('skewVal')"       title="CBOE SKEW index at entry (real mode only)">SKEW</th>
             <th onclick="sortBy('skewMultShort')" title="Skew multiplier applied to short put IV">Short ×</th>
@@ -197,15 +204,17 @@
             <th onclick="sortBy('premiumPct')"    title="Net premium ÷ margin (monthly yield if win)">Prem %</th>
             <th onclick="sortBy('retPct')"        title="Return on margin deployed">Ret %</th>
             <th onclick="sortBy('dollarPnl')"     title="P&amp;L in euros this month">P&amp;L €</th>
-            <th onclick="sortBy('cap')"           title="Running capital">Capital €</th>
-            <th onclick="sortBy('dd')"            title="Drawdown from equity peak">DD %</th>
+            <th onclick="sortBy('cap')"           title="Running capital after this month">Capital €</th>
+            <th onclick="sortBy('marginDeployed')" title="Margin locked in this trade">Margin €</th>
+            <th onclick="sortBy('freeCap')"        title="Capital not tied up in margin">Free €</th>
+            <th onclick="sortBy('dd')"             title="Drawdown from equity peak">DD %</th>
             <th onclick="sortBy('sLow')"          title="Estimated intra-month SPY low (Brownian bridge)">Est. low</th>
             <th onclick="sortBy('breachProb')"    title="Estimated probability short strike breached mid-month">Breach %</th>
             <th onclick="sortBy('pricingMode')"   title="Chain = real OptionsDX bid/ask · BS = Black-Scholes estimate">Pricing</th>
           </tr>
         </thead>
         <tbody id="tableBody">
-          <tr><td colspan="22" class="empty-state">Loading CBOE data…</td></tr>
+          <tr><td colspan="25" class="empty-state">Loading CBOE data…</td></tr>
         </tbody>
       </table>
     </div>
@@ -335,8 +344,6 @@ function renderSummary(stats) {
     { label:'Total return', value: fmt(s.totalReturn, 0),                  cls: s.totalReturn > 0 ? 'c-green' : 'c-red' },
     { label:'Max DD',       value: `${s.maxDD}%`,                          cls: 'c-red' },
     { label:'Skew',         value: skewStr,                                cls: isReal ? 'c-blue' : 'c-muted' },
-    { label:'Sharpe',       value: s.sharpe !== null ? String(s.sharpe) : 'N/A', cls: s.sharpe >= 1 ? 'c-green' : s.sharpe >= 0.5 ? 'c-accent' : s.sharpe < 0 ? 'c-red' : '' },
-    { label:'SPY Sharpe',   value: s.spySharpe !== null ? String(s.spySharpe) : 'N/A', cls: 'c-blue' },
     { label:'SPY CAGR',     value: fmt(s.spyCagr),                        cls: 'c-blue' },
   ];
   document.getElementById('summaryStrip').innerHTML = items.map((it, i) => `
@@ -348,17 +355,26 @@ function renderSummary(stats) {
 }
 
 // ── BADGE ──
-function badge(scenario) {
+// W/L outcome: purely P&L based
+function outcomeCell(m) {
+  if (m.skipped) return '<span class="badge badge-skipped">SKIP</span>';
+  return m.outcome === 'win'
+    ? '<span class="badge badge-win">WIN</span>'
+    : '<span class="badge badge-loss">LOSS</span>';
+}
+
+// Exit type: how the trade was closed
+function exitTypeCell(m) {
+  if (m.skipped) return '—';
   const map = {
-    win:          ['badge-win',     'WIN'],
-    profit_taken: ['badge-pt',      'PROFIT TAKEN'],
-    exited_21:    ['badge-e21',     'CLOSED @21 DTE'],
-    partial:      ['badge-partial', 'PARTIAL'],
-    full_loss:    ['badge-loss',    'FULL LOSS'],
-    stopped:      ['badge-stopped', 'STOPPED'],
-    skipped:      ['badge-skipped', 'SKIPPED'],
+    expiry_win:     ['badge-e-expiry',  'EXPIRED'],
+    expiry_partial: ['badge-e-partial', 'PARTIAL'],
+    expiry_full:    ['badge-e-full',    'FULL LOSS'],
+    dte21:          ['badge-e-dte21',   '21 DTE'],
+    profit_target:  ['badge-e-pt',      '50% TARGET'],
+    stopped:        ['badge-e-stopped', 'STOPPED'],
   };
-  const [cls, label] = map[scenario] || ['badge-skipped', scenario];
+  const [cls, label] = map[m.exitType] || ['badge-skipped', m.exitType || '?'];
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
@@ -394,7 +410,7 @@ function buildRows(data) {
   document.getElementById('rowCount').textContent = `${data.length} rows`;
 
   if (data.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="22" class="empty-state">No rows match filter</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="25" class="empty-state">No rows match filter</td></tr>`;
     return;
   }
 
@@ -403,7 +419,7 @@ function buildRows(data) {
   data.forEach(m => {
     if (m.year !== lastYear) {
       lastYear = m.year;
-      html += `<tr class="year-group"><td colspan="22">${m.year}</td></tr>`;
+      html += `<tr class="year-group"><td colspan="25">${m.year}</td></tr>`;
     }
 
     const rowCls = m.scenario === 'skipped' ? 'row-skipped' : '';
@@ -438,7 +454,12 @@ function buildRows(data) {
 
     html += `<tr class="${rowCls}" data-scenario="${m.scenario}">
       <td>${m.date}</td>
-      <td>${badge(m.scenario)}</td>
+      <td>${outcomeCell(m)}</td>
+      <td>${exitTypeCell(m)}</td>
+      <td class="c-muted" style="font-size:10px">${m.entryDate ?? '—'}</td>
+      <td class="c-muted" style="font-size:10px;${(m.exitedAt21||m.profitTaken)?'color:var(--accent)':''}">${m.closeDate ?? '—'}</td>
+      <td class="c-muted" style="font-size:10px">${m.expiryDate ?? '—'}</td>
+      <td class="${m.vixEntry != null && Math.abs((m.vixEntry??0)-(m.vix??0))>=1.5 ? 'c-orange' : 'c-muted'}">${m.vixEntry != null ? m.vixEntry : '—'}</td>
       <td class="${vixColor(m.vix)}">${m.vix}</td>
       <td>${vixPeakCell}</td>
       <td>${skewCell}</td>
@@ -455,6 +476,8 @@ function buildRows(data) {
       <td>${retPct}</td>
       <td>${pnlEur}</td>
       <td class="c-accent">€${m.cap.toFixed(0)}</td>
+      <td style="font-size:10px">${m.skipped ? '<span class="c-muted">—</span>' : '<span style="color:rgba(255,120,100,0.9)">€' + Math.round(m.marginDeployed ?? 0).toLocaleString() + '</span>'}</td>
+      <td style="font-size:10px">${m.skipped ? '<span class="c-muted">€' + Math.round(m.freeCap ?? m.cap).toLocaleString() + '</span>' : '<span style="color:rgba(29,218,122,0.85)">€' + Math.round(m.freeCap ?? 0).toLocaleString() + '</span>'}</td>
       <td>${ddCell}</td>
       <td>${sLowCell}</td>
       <td>${bpCell}</td>
@@ -476,7 +499,12 @@ function setFilter(f, btn) {
 function applyFilter() {
   if (!allRows.length) return;
   const filtered = activeFilter === 'all'
-    ? allRows : allRows.filter(m => m.scenario === activeFilter);
+    ? allRows
+    : allRows.filter(m =>
+        m.outcome   === activeFilter ||
+        m.exitType  === activeFilter ||
+        m.scenario  === activeFilter   // 'skipped' fallback
+      );
   buildRows(sortRows(filtered));
 }
 
