@@ -195,15 +195,24 @@ function runBacktest(params) {
     // VIX filter
     if (vixRaw < vixFloor || vixRaw > vixCeil || smaBlocked) {
       skippedMonths++;
+      // Idle capital earns the risk-free rate (T-bill equivalent).
+      // Without this, filtered months earn 0% which understates strategy returns.
+      const rfrSkip      = useHistRFR ? (RFR[i - 1] / 100) : (fixedRFR / 100);
+      const rfrMonthly   = rfrSkip / 12;               // annualised → monthly
+      const rfrDollar    = cap * rfrMonthly;
+      cap               += rfrDollar;
+      if (cap > peak) peak = cap;
       const spyBnH = startCap * (S1_adj / spyWindowBase);
       monthly.push({
         date, year, S0, S1: S1_adj, vix: +vixRaw.toFixed(2),
         skipped: true,
-        retPct: 0, retCapPct: 0, dollarPnl: 0,
+        retPct: +(rfrMonthly * 100).toFixed(3),        // small positive RFR return
+        retCapPct: +(rfrMonthly * 100).toFixed(3),
+        dollarPnl: +rfrDollar.toFixed(2),
         cap: +cap.toFixed(2), spyBnH: +spyBnH.toFixed(2),
         dd: peak > 0 ? +((cap - peak) / peak * 100).toFixed(2) : 0,
         win: false, scenario: 'skipped',
-        rfr: 0, breachProb: 0, sLow: 0,
+        rfr: +(rfrSkip * 100).toFixed(2), breachProb: 0, sLow: 0,
         skewVal: useReal ? +(SKEW_REAL[i - 1]).toFixed(1) : null,
         skewMultShort: null, skewMultLong: null,
         smaVal: smaVal !== null ? +smaVal.toFixed(2) : null,
@@ -494,6 +503,31 @@ function runBacktest(params) {
     ? +(traded.reduce((s, m) => s + (m.skewMultShort || 0), 0) / traded.length).toFixed(2)
     : null;
 
+  // ── Sharpe ratio ──
+  // Monthly excess returns (strategy return minus risk-free rate for that month).
+  // Annualised: (mean_excess / std_excess) × sqrt(12).
+  // Uses ALL months (traded + skipped) so idle RFR months count as ~0 excess.
+  const allReturns = monthly.map(m => m.retCapPct / 100);  // monthly return on capital
+  const rfrMonthly = monthly.map((m, i) => {
+    const rfrAnn = useHistRFR ? (RFR[i] || 0) / 100 : fixedRFR / 100;
+    return rfrAnn / 12;
+  });
+  const excessReturns = allReturns.map((r, i) => r - rfrMonthly[i]);
+  const meanExcess    = excessReturns.reduce((s, x) => s + x, 0) / excessReturns.length;
+  const variance      = excessReturns.reduce((s, x) => s + (x - meanExcess) ** 2, 0) / excessReturns.length;
+  const stdExcess     = Math.sqrt(variance);
+  const sharpe        = stdExcess > 0 ? +((meanExcess / stdExcess) * Math.sqrt(12)).toFixed(2) : null;
+
+  // SPY Sharpe for comparison
+  const spyMonthlyRets = monthly.map((m, i) => {
+    const prevBnH = i === 0 ? startCap : monthly[i - 1].spyBnH;
+    return (m.spyBnH - prevBnH) / prevBnH;
+  });
+  const spyExcess = spyMonthlyRets.map((r, i) => r - rfrMonthly[i]);
+  const spyMeanEx = spyExcess.reduce((s, x) => s + x, 0) / spyExcess.length;
+  const spyVar    = spyExcess.reduce((s, x) => s + (x - spyMeanEx) ** 2, 0) / spyExcess.length;
+  const spySharpe = Math.sqrt(spyVar) > 0 ? +((spyMeanEx / Math.sqrt(spyVar)) * Math.sqrt(12)).toFixed(2) : null;
+
   return { monthly, annual,
     stats: {
       n: monthly.length, traded: traded.length, skipped: skippedMonths,
@@ -517,6 +551,7 @@ function runBacktest(params) {
       exited21Months:    traded.filter(m => m.exitedAt21).length,
       smaSkipped:        monthly.filter(m => m.smaBlocked).length,
       finalCap: +cap.toFixed(0), startCap,
+      sharpe, spySharpe,
       dataSource, avgSKEW, avgSkewMultShort
     }
   };
@@ -618,6 +653,10 @@ function renderStats(s) {
       })(),
       cls: 'accent' },
     { label: 'Max Drawdown',         value: `${s.maxDD}%`,            sub: 'from equity peak',                      cls: 'red' },
+    { label: 'Sharpe Ratio',
+      value: s.sharpe !== null ? String(s.sharpe) : 'N/A',
+      sub: s.spySharpe !== null ? `SPY: ${s.spySharpe}` : 'annualised, vs RFR',
+      cls: s.sharpe !== null ? (s.sharpe >= 1 ? 'green' : s.sharpe >= 0.5 ? 'accent' : s.sharpe < 0 ? 'red' : '') : '' },
     { label: 'Total Return',         value: fmt(s.totalReturn, 0),    sub: `${fmtE(s.startCap)} → ${fmtE(s.finalCap)} · SPY ${fmt(s.spyTotalReturn,0)}`, cls: s.totalReturn > 0 ? 'green' : 'red' },
     { label: 'Avg Premium / Margin', value: `+${s.avgPremPct}%`,      sub: 'net credit ÷ margin',                   cls: 'green' },
     { label: 'Avg Loss Month',       value: `${s.avgLoss}%`,          sub: 'on margin deployed',                    cls: 'red' },

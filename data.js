@@ -370,22 +370,32 @@ async function loadRealData(
       if (!isNaN(close) && close > 0 && !isNaN(adj) && !isNaN(low)) {
         spyByDate[row.date.trim()] = {
           adjClose:  adj,
-          rawClose:  close,                     // ← actual price, used for options settlement
-          adjLow:    low * (adj / close)        // adjust the low by the same ratio
+          rawClose:  close,
+          rawLow:    low,                       // actual unadjusted daily low (for strike breach checks)
+          adjLow:    low * (adj / close)        // dividend-adjusted low (kept for reference)
         };
       }
     }
     const spyTradingDates = new Set(Object.keys(spyByDate));
 
-    // Group by month: last adjClose, min adjLow
+    // Group by month: last adjClose, min rawLow up to 3rd Friday only.
+    // SPY_MONTHLY_LOW is used to check if the short strike was breached during
+    // the trade window. Options expire on the 3rd Friday — days after that
+    // belong to the NEXT trade, so we must not include them in this month's low.
     const spyMonthClose = {};   // last trading day adjClose
-    const spyMonthLow   = {};   // minimum adjLow across all days
+    const spyMonthLow   = {};   // minimum RAW low, up to 3rd Friday (inclusive)
     for (const [dateStr, vals] of Object.entries(spyByDate)) {
       const mk = _isoMonthKey(dateStr);
-      // Last trading day: overwrite (dates are processed in order from _parseCSV)
+      const [y, m] = mk.split('-').map(Number);
+      const expiry = _thirdFriday(y, m);
+      // Last trading day: overwrite regardless (used for SPY_REAL)
       spyMonthClose[mk] = vals.adjClose;
-      if (spyMonthLow[mk] == null || vals.adjLow < spyMonthLow[mk]) {
-        spyMonthLow[mk] = vals.adjLow;
+      // Low: only include days on or before the 3rd Friday
+      if (dateStr <= expiry) {
+        // Use rawClose-ratio to get raw low (not adjusted), matching options strike prices
+        if (spyMonthLow[mk] == null || vals.rawLow < spyMonthLow[mk]) {
+          spyMonthLow[mk] = vals.rawLow;
+        }
       }
     }
 

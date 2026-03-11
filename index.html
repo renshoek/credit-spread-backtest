@@ -461,6 +461,7 @@ function copyResults() {
     `Stop-loss:    ${p.stopLossType === 'none' ? 'None' : p.stopLossType + ' ' + p.stopLossVal}  |  Slippage: $${p.slippage}/ct`,
     '',
     `CAGR:         ${s.cagr !== null ? s.cagr.toFixed(1) + '%' : 'N/A'}  (SPY B&H: ${s.spyCagr.toFixed(1)}%)`,
+    `Sharpe:       ${s.sharpe !== null ? s.sharpe : 'N/A'}  (SPY: ${s.spySharpe !== null ? s.spySharpe : 'N/A'})`,
     `Total return: ${s.totalReturn.toFixed(1)}%`,
     `Profitable:   ${s.winRate}%  (${s.wins}W / ${s.losses}L of ${s.traded} traded)`,
     `Expired wthl: ${s.worthlessMonths}  |  Closed @21: ${s.exited21Months}  |  Profit target: ${s.profitTakenMonths}`,

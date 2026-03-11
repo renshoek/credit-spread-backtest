@@ -335,6 +335,8 @@ function renderSummary(stats) {
     { label:'Total return', value: fmt(s.totalReturn, 0),                  cls: s.totalReturn > 0 ? 'c-green' : 'c-red' },
     { label:'Max DD',       value: `${s.maxDD}%`,                          cls: 'c-red' },
     { label:'Skew',         value: skewStr,                                cls: isReal ? 'c-blue' : 'c-muted' },
+    { label:'Sharpe',       value: s.sharpe !== null ? String(s.sharpe) : 'N/A', cls: s.sharpe >= 1 ? 'c-green' : s.sharpe >= 0.5 ? 'c-accent' : s.sharpe < 0 ? 'c-red' : '' },
+    { label:'SPY Sharpe',   value: s.spySharpe !== null ? String(s.spySharpe) : 'N/A', cls: 'c-blue' },
     { label:'SPY CAGR',     value: fmt(s.spyCagr),                        cls: 'c-blue' },
   ];
   document.getElementById('summaryStrip').innerHTML = items.map((it, i) => `

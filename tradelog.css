@@ -274,13 +274,24 @@ table.tl tr.row-skipped td:nth-child(2) { opacity:1; }
   display:inline-block; padding:2px 8px; border-radius:3px;
   font-size:8px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
 }
+/* ── Outcome column: WIN / LOSS ── */
 .badge-win      { background:rgba(29,218,122,0.15);  color:var(--green);  border:1px solid rgba(29,218,122,0.3); }
-.badge-pt       { background:rgba(29,218,122,0.08);  color:#5dd9a0;       border:1px solid rgba(29,218,122,0.2); }
-.badge-e21      { background:rgba(29,218,122,0.05);  color:#4db890;       border:1px solid rgba(29,218,122,0.15); }
-.badge-partial  { background:rgba(255,150,50,0.12);  color:var(--orange); border:1px solid rgba(255,150,50,0.3); }
 .badge-loss     { background:rgba(255,69,96,0.12);   color:var(--red);    border:1px solid rgba(255,69,96,0.3); }
-.badge-stopped  { background:rgba(255,138,101,0.12); color:#ff8a65;       border:1px solid rgba(255,138,101,0.3); }
 .badge-skipped  { background:rgba(61,65,96,0.3);     color:var(--muted2); border:1px solid rgba(61,65,96,0.5); }
+
+/* ── Exit type column badges ── */
+.badge-e-expiry  { background:rgba(29,218,122,0.08);  color:#5dd9a0;       border:1px solid rgba(29,218,122,0.2); }
+.badge-e-partial { background:rgba(255,150,50,0.12);  color:var(--orange); border:1px solid rgba(255,150,50,0.3); }
+.badge-e-full    { background:rgba(255,69,96,0.18);   color:var(--red);    border:1px solid rgba(255,69,96,0.4); }
+.badge-e-dte21   { background:rgba(100,120,255,0.12); color:#8899ff;       border:1px solid rgba(100,120,255,0.3); }
+.badge-e-pt      { background:rgba(240,165,0,0.12);   color:var(--accent); border:1px solid rgba(240,165,0,0.3); }
+.badge-e-stopped { background:rgba(255,138,101,0.12); color:#ff8a65;       border:1px solid rgba(255,138,101,0.3); }
+
+/* ── Legacy (kept for chart colour compat) ── */
+.badge-pt       { background:rgba(240,165,0,0.12);   color:var(--accent); border:1px solid rgba(240,165,0,0.3); }
+.badge-e21      { background:rgba(100,120,255,0.12); color:#8899ff;       border:1px solid rgba(100,120,255,0.3); }
+.badge-partial  { background:rgba(255,150,50,0.12);  color:var(--orange); border:1px solid rgba(255,150,50,0.3); }
+.badge-stopped  { background:rgba(255,138,101,0.12); color:#ff8a65;       border:1px solid rgba(255,138,101,0.3); }
 
 /* ── COLOR HELPERS ── */
 .c-green  { color:var(--green) !important; }
@@ -327,3 +338,5 @@ table.tl tr.row-skipped td:nth-child(2) { opacity:1; }
   .header-title { font-size:16px; }
   .ctrl input, .ctrl select { font-size:14px; }
 }
+
+.filter-sep { color:var(--border); margin:0 4px; align-self:center; }
