@@ -186,6 +186,7 @@
     <button class="tab-btn" data-tab="monthly">Monthly P&amp;L</button>
     <button class="tab-btn" data-tab="annual">Annual Returns</button>
     <button class="tab-btn" data-tab="drawdown">Drawdown</button>
+    <button class="tab-btn" data-tab="capital">Capital</button>
     <label class="chart-toggle" id="spyToggleWrap">
       <input type="checkbox" id="spyToggle" checked> SPY B&amp;H
     </label>
@@ -228,6 +229,18 @@
 
     <div class="tab-panel" id="panel-drawdown">
       <div style="position:relative;height:340px"><canvas id="chartDrawdown"></canvas></div>
+    </div>
+
+    <div class="tab-panel" id="panel-capital">
+      <div style="display:flex;gap:16px;margin-bottom:10px;align-items:center;padding:0 4px">
+        <span style="font-size:10px;color:var(--muted2)">
+          <span style="display:inline-block;width:10px;height:10px;background:rgba(29,218,122,0.5);border-radius:2px;margin-right:4px"></span>Free capital
+          &nbsp;
+          <span style="display:inline-block;width:10px;height:10px;background:rgba(255,100,80,0.4);border-radius:2px;margin-right:4px"></span>Margin in use
+        </span>
+        <span id="capitalSummary" style="font-size:10px;color:var(--muted2);margin-left:auto"></span>
+      </div>
+      <div style="position:relative;height:320px"><canvas id="chartCapital"></canvas></div>
     </div>
 
   </div>
