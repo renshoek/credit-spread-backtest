@@ -462,15 +462,15 @@ function copyResults() {
     '',
     `CAGR:         ${s.cagr !== null ? s.cagr.toFixed(1) + '%' : 'N/A'}  (SPY B&H: ${s.spyCagr.toFixed(1)}%)`,
     `Total return: ${s.totalReturn.toFixed(1)}%`,
-    `Win rate:     ${s.winRate}%  (${s.wins}W / ${s.losses}L of ${s.traded} traded)`,
+    `Profitable:   ${s.winRate}%  (${s.wins}W / ${s.losses}L of ${s.traded} traded)`,
+    `Expired wthl: ${s.worthlessMonths}  |  Closed @21: ${s.exited21Months}  |  Profit target: ${s.profitTakenMonths}`,
     `Max drawdown: ${s.maxDD}%`,
     `Avg win:      +${s.avgWin}%  |  Avg loss: ${s.avgLoss}%`,
     `Best month:   +${s.bestMonth}%  |  Worst: ${s.worstMonth}%`,
     `Full losses:  ${s.fullLossMonths}  |  Stopped: ${s.stoppedMonths}  |  Skipped: ${s.skipped}`,
     `Profit taken: ${s.profitTakenMonths}  |  Closed @21: ${s.exited21Months}`,
     `Final cap:    €${s.finalCap.toLocaleString()}  (started €${s.startCap.toLocaleString()})`,
-  ].join('
-');
+  ].join('\n');
 
   navigator.clipboard.writeText(lines).then(() => {
     const btn = document.getElementById('copyResultsBtn');

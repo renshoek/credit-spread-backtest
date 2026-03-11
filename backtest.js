@@ -454,7 +454,7 @@ function runBacktest(params) {
     annMap[m.year].months.push(m);
     if (!m.skipped) {
       annMap[m.year].traded.push(m);
-      if (m.win)        annMap[m.year].wins++;
+      if (m.profitable) annMap[m.year].wins++;  // wins = profitable trades
       if (m.profitable) annMap[m.year].profitable++;
       if (m.scenario === 'full_loss') annMap[m.year].fullLoss++;
     }
@@ -471,8 +471,9 @@ function runBacktest(params) {
   });
 
   const traded         = monthly.filter(m => !m.skipped);
-  const wins           = traded.filter(m => m.win);           // expired worthless
-  const profitable     = traded.filter(m => m.profitable);    // any positive P&L
+  const wins           = traded.filter(m => m.profitable);    // positive P&L (primary win metric)
+  const worthless      = traded.filter(m => m.scenario === 'win'); // expired worthless (subset)
+  const profitable     = wins;                                // alias
   const losses         = traded.filter(m => !m.profitable);   // negative P&L
   const yrs            = monthly.length / 12;
   const spyEnd         = monthly[monthly.length - 1].spyBnH;
@@ -496,11 +497,11 @@ function runBacktest(params) {
   return { monthly, annual,
     stats: {
       n: monthly.length, traded: traded.length, skipped: skippedMonths,
-      wins: wins.length,
-      profitableMonths: profitable.length,
+      wins: wins.length,           // = profitable trades (wins + losses = traded)
+      worthlessMonths: worthless.length,  // expired worthless (scenario=win)
       losses: losses.length,
       winRate:          +(wins.length      / Math.max(traded.length, 1) * 100).toFixed(1),
-      profitableRate:   +(profitable.length / Math.max(traded.length, 1) * 100).toFixed(1),
+      profitableRate:   +(wins.length      / Math.max(traded.length, 1) * 100).toFixed(1),
       cagr, spyCagr, spyTotalReturn,
       totalReturn:+(((cap - startCap) / startCap) * 100).toFixed(1),
       maxDD:      +(Math.min(...monthly.map(m => m.dd))).toFixed(1),
@@ -607,12 +608,12 @@ function renderStats(s) {
 
   const cards = [
     { label: 'Strategy CAGR',       value: cagrVal,                  sub: `SPY B&H: ${fmt(s.spyCagr)}`,            cls: cagrCls },
-    { label: 'Win Rate', value: `${s.winRate}%`,
+    { label: 'Profitable %', value: `${s.winRate}%`,
       sub: (() => {
-        const parts = [`${s.wins} wins`];
-        if (s.profitTakenMonths > 0) parts.push(`${s.profitTakenMonths} profit-taken`);
-        if (s.exited21Months > 0)    parts.push(`${s.exited21Months} closed@21DTE`);
-        parts.push(`${s.profitableRate}% profitable`);
+        const parts = [`${s.wins}W / ${s.losses}L of ${s.traded}`];
+        if (s.worthlessMonths > 0) parts.push(`${s.worthlessMonths} exp. worthless`);
+        if (s.profitTakenMonths > 0) parts.push(`${s.profitTakenMonths} 50% target`);
+        if (s.exited21Months > 0)    parts.push(`${s.exited21Months} @21DTE`);
         return parts.join(' · ');
       })(),
       cls: 'accent' },
