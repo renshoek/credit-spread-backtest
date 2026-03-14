@@ -93,6 +93,17 @@
         <div class="ctrl-label">VIX ceil</div>
         <input type="number" id="vixCeil" value="999" min="10" max="999" step="5">
       </div>
+      <div class="ctrl" style="min-width:72px" title="Trading days before entry to sample VIX for the filter. 0 = on entry day itself.">
+        <div class="ctrl-label">VIX days ago</div>
+        <input type="number" id="vixLookback" value="0" min="0" max="30" step="1">
+      </div>
+      <div class="ctrl" id="vixFieldCtrl" style="display:none;min-width:60px" title="Use VIX open or close on the lookback day">
+        <div class="ctrl-label">O / C</div>
+        <select id="vixField">
+          <option value="close">Close</option>
+          <option value="open">Open</option>
+        </select>
+      </div>
     </div>
 
     <!-- Row 3: Sim-only skew — hidden in real mode -->
@@ -166,7 +177,7 @@
       <div class="ph-item"><strong>Margin use %</strong> — Fraction of capital deployed as margin each month. 25% = professional standard. At 25%, a full-loss month costs −25% of capital. Never go above 30–35%.</div>
       <div class="ph-item ph-real"><strong>Short/Long skew &times; (Simulated mode only)</strong> — Static IV multipliers applied to VIX. 1.30/1.50 are estimates for 5%/8% OTM puts. In <strong>Real mode</strong> these are replaced by dynamic SKEW-derived values per month.</div>
       <div class="ph-item ph-real"><strong>CBOE SKEW Index (Real mode)</strong> — Measures tail-risk pricing. <code>mult = 1 + (SKEW−100) × OTM% / 500</code>. SKEW=130 at 5% OTM → ×1.30. Steepens in crashes, flattens in calm markets. Dynamic per month.</div>
-      <div class="ph-item"><strong>VIX floor / ceiling</strong> — Skip months outside this range. Floor: avoid tiny-premium low-vol months. Ceiling: avoid extreme fear regimes. 0 / 999 = always trade.</div>
+      <div class="ph-item"><strong>VIX floor / ceiling</strong> — Skip months outside this range. <strong>VIX days ago</strong>: which day's VIX to compare — 0 = entry day itself, 1 = prior trading day, etc. When &gt; 0 you can pick open or close. Useful for testing regime signals (e.g. "skip if VIX 3 days ago was above 25").</div>
       <div class="ph-item"><strong>Exit strategy</strong> — When to close the trade. <em>Hold to expiry</em>: keep until 3rd Friday, collect full premium if SPY stays above short strike. <em>Close at 21 DTE</em>: always close ~21 days before expiry using real market prices from chain data — the Tastytrade "never hold past 21 DTE" rule. <em>50% profit OR 21 DTE</em>: close as soon as spread has lost 50% of its value (your profit = 50% of premium collected), or at 21 DTE if that target was never hit. Uses real mid prices from chain data for all exits.</div>
       <div class="ph-item"><strong>SMA filter</strong> — Skip any month where SPY's entry price is <em>below</em> its N-day simple moving average. Designed to avoid trading in sustained downtrends (e.g. 2022). Uses adjusted closes. 200-day is standard; 50-day is more reactive. Note: this is a lagging filter — it protects against the <em>next</em> month, not a crash that starts after you enter.</div>
       <div class="ph-item"><strong>Stop-loss</strong> — Three modes: <em>None</em> = always hold to expiry. <em>× credit</em> = close when unrealized loss hits N× premium collected (Tastytrade standard: 2×). <em>% of margin</em> = close when loss exceeds N% of margin deployed (e.g. 50%). <em>$ per contract</em> = close when loss exceeds a fixed dollar amount (100 shares per contract). With real SPY data, stop is triggered by actual intra-month daily lows, not estimates.</div>
@@ -449,6 +460,10 @@ document.getElementById('ctrlPanel').addEventListener('change', function(e) {
     updateBanner(e.target.value, null);
   }
   if (id === 'stopLossType') updateStopLossControls();
+  if (id === 'vixLookback') {
+    const lb = parseInt(e.target.value) || 0;
+    document.getElementById('vixFieldCtrl').style.display = lb > 0 ? '' : 'none';
+  }
   if (id === 'smaFilter') {
     document.getElementById('smaDaysCtrl').style.display = e.target.checked ? '' : 'none';
   }

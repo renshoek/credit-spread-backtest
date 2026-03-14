@@ -129,6 +129,8 @@ let SKEW_REAL         = null;
 let SPY_REAL          = null;
 let SPY_SETTLE        = null;   // adjusted close on 3rd Friday  (BS mode)
 let VIX_DAILY         = null;   // { 'YYYY-MM-DD': close } for entry-date VIX lookup
+let VIX_DAILY_OPEN    = null;   // { 'YYYY-MM-DD': open  } for lookback-open filter
+let VIX_DAILY_DATES   = null;   // sorted ISO date array — for N-day lookback indexing
 let SPY_SETTLE_ACTUAL = null;   // raw (unadjusted) close on 3rd Friday (chain mode — actual option settlement price)
 let SPY_MONTHLY_LOW   = null;
 let SPY_ENTRY_DATE    = null;   // first trading day of each month (for SMA)
@@ -338,24 +340,29 @@ async function loadRealData(
     const vixMonthClose = {};
     const vixMonthHigh  = {};
     const vixDaily      = {};
+    const vixDailyOpen  = {};
     for (const row of _parseCSV(vixText)) {
       const mk = _monthKey(row.DATE);
       if (!mk) continue;
       const close = parseFloat(row.CLOSE);
+      const open  = parseFloat(row.OPEN);
       const high  = parseFloat(row.HIGH);
       if (!isNaN(close)) vixMonthClose[mk] = close;
       if (!isNaN(high))  vixMonthHigh[mk]  = Math.max(vixMonthHigh[mk] || 0, high);
       // Daily lookup: normalise date to YYYY-MM-DD
-      if (!isNaN(close) && row.DATE) {
+      if (row.DATE) {
         const parts = row.DATE.trim().split('/');
         if (parts.length === 3) {
           const [mm, dd, yyyy] = parts;
           const iso = `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
-          vixDaily[iso] = close;
+          if (!isNaN(close)) vixDaily[iso]     = close;
+          if (!isNaN(open))  vixDailyOpen[iso] = open;
         }
       }
     }
-    VIX_DAILY = vixDaily;
+    VIX_DAILY       = vixDaily;
+    VIX_DAILY_OPEN  = vixDailyOpen;
+    VIX_DAILY_DATES = Object.keys(vixDaily).sort();
 
     // ── Parse SKEW ──
     const skewMonthClose = {};
@@ -503,7 +510,7 @@ async function loadRealData(
     REAL_DATA_ERROR  = err.message;
     REAL_DATA_LOADED = false;
     VIX_REAL = VIX_MONTHLY_HIGH = SKEW_REAL = null;
-    SPY_REAL = SPY_SETTLE = SPY_SETTLE_ACTUAL = SPY_MONTHLY_LOW = SPY_ENTRY_DATE = SPY_DAILY_SORTED = VIX_DAILY = null;
+    SPY_REAL = SPY_SETTLE = SPY_SETTLE_ACTUAL = SPY_MONTHLY_LOW = SPY_ENTRY_DATE = SPY_DAILY_SORTED = VIX_DAILY = VIX_DAILY_OPEN = VIX_DAILY_DATES = null;
     console.error('loadRealData failed:', err.message);
     return { ok: false, error: err.message };
   }

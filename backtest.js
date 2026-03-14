@@ -99,6 +99,25 @@ function estimateIntraMonthLow(S0, S1, vixForPath, dteDays) {
   return Math.min(S0, S1) * (1 - dipFactor);
 }
 
+// ── VIX LOOKBACK HELPER ──
+// Returns the VIX value N trading days before entryDate (0 = on entry day).
+// field: 'close' (default) or 'open'.
+// Falls back to null if data unavailable for the target date.
+function getVixFilterVal(entryDate, lookback, field) {
+  if (!VIX_DAILY_DATES || !entryDate) return null;
+  // Find index of entryDate (or closest prior trading day)
+  let idx = -1;
+  for (let i = VIX_DAILY_DATES.length - 1; i >= 0; i--) {
+    if (VIX_DAILY_DATES[i] <= entryDate) { idx = i; break; }
+  }
+  if (idx < 0) return null;
+  const targetIdx = idx - lookback;
+  if (targetIdx < 0) return null;
+  const targetDate = VIX_DAILY_DATES[targetIdx];
+  if (field === 'open') return (VIX_DAILY_OPEN && VIX_DAILY_OPEN[targetDate] != null) ? VIX_DAILY_OPEN[targetDate] : null;
+  return (VIX_DAILY && VIX_DAILY[targetDate] != null) ? VIX_DAILY[targetDate] : null;
+}
+
 // ─────────────────────────────────────────────────────────────
 // BACKTEST ENGINE
 // ─────────────────────────────────────────────────────────────
@@ -115,6 +134,8 @@ function runBacktest(params) {
     skewLong     = 1.50,   // used only in sim mode
     vixFloor     = 0,
     vixCeil      = 999,
+    vixLookback  = 0,        // trading days before entry to sample VIX (0 = on entry day)
+    vixLookbackField = 'close', // 'close' | 'open'
     stopLossType   = 'none',
     stopLossVal    = 0,
     exitStrategy   = 'expiry',  // 'expiry' | 'dte21' | 'dte21_or_50pct'
@@ -177,14 +198,33 @@ function runBacktest(params) {
     const chainEntry = (useReal && OPTIONS_CHAIN) ? chainLookup(chainKey, shortOTMp) : null;
     const useChain   = chainEntry !== null;
 
+    // ── Entry date (needed for VIX entry lookup and SMA filter) ──
+    // Computed here so vixEntry is available before the skip decision.
+    const entryDate = (useChain && OPTIONS_CHAIN?.chain[chainKey]?.entry_date)
+      ? OPTIONS_CHAIN.chain[chainKey].entry_date
+      : (SPY_ENTRY_DATE ? SPY_ENTRY_DATE[i - 1] : null);
+
+    // ── VIX on actual entry date ──
+    // Using prior month-end VIX for the filter creates look-ahead bias: VIX can spike
+    // between month-end and the actual entry date (first trading day of next month).
+    // vixEntry uses the daily VIX on the real entry date when available; falls back to
+    // prior month-end only when daily data is unavailable.
+    const vixEntry = (VIX_DAILY && entryDate && VIX_DAILY[entryDate] != null)
+      ? VIX_DAILY[entryDate]
+      : vixRaw;  // fallback to prior month-end
+
+    // vixFilterVal: the value actually compared against floor/ceiling.
+    // lookback=0 + close = same as vixEntry (fast path, no extra lookup).
+    // lookback>0 or field=open = looks N trading days back from entry.
+    // Falls back to vixEntry if data unavailable for the target date.
+    const vixFilterVal = (vixLookback === 0 && vixLookbackField === 'close')
+      ? vixEntry
+      : (getVixFilterVal(entryDate, vixLookback, vixLookbackField) ?? vixEntry);
+
     // ── SMA filter ──
     // Skip month if SPY entry price is below its N-day moving average.
-    // Entry date: chain mode uses actual first trading day; otherwise use prior month-end.
     let smaVal = null;
     if (smaFilter && smaDays > 0 && SPY_DAILY_SORTED) {
-      const entryDate = (useChain && OPTIONS_CHAIN?.chain[chainKey]?.entry_date)
-        ? OPTIONS_CHAIN.chain[chainKey].entry_date
-        : (SPY_ENTRY_DATE ? SPY_ENTRY_DATE[i - 1] : null);
       if (entryDate) smaVal = computeSMA(entryDate, smaDays);
     }
     const entryPrice = useChain
@@ -192,8 +232,13 @@ function runBacktest(params) {
       : S0;
     const smaBlocked = smaFilter && smaVal !== null && entryPrice < smaVal;
 
-    // VIX filter
-    if (vixRaw < vixFloor || vixRaw > vixCeil || smaBlocked) {
+    // ── VIX filter ──
+    const skipReason = vixFilterVal < vixFloor ? 'VIX < floor'
+      : vixFilterVal > vixCeil  ? 'VIX > ceil'
+      : smaBlocked              ? 'SMA filter'
+      : null;
+
+    if (skipReason) {
       skippedMonths++;
       // Idle capital earns risk-free rate (T-bill equivalent)
       const rfrSkip    = useHistRFR ? (RFR[i - 1] / 100) : (fixedRFR / 100);
@@ -204,7 +249,9 @@ function runBacktest(params) {
       const spyBnH = startCap * (S1_adj / spyWindowBase);
       monthly.push({
         date, year, S0, S1: S1_adj, vix: +vixRaw.toFixed(2),
-        skipped: true,
+        vixEntry: +vixEntry.toFixed(2),
+        vixFilterVal: +vixFilterVal.toFixed(2),
+        skipped: true, skipReason,
         retPct:    +(rfrMonthly * 100).toFixed(3),
         retCapPct: +(rfrMonthly * 100).toFixed(3),
         dollarPnl: +rfrDollar.toFixed(2),
@@ -270,18 +317,20 @@ function runBacktest(params) {
 
     } else {
       // ── BLACK-SCHOLES FALLBACK ──
+      // Use vixEntry (VIX on actual entry date) not vixRaw (end-of-entry-month).
+      // vixRaw is ~4 weeks after entry — using it for pricing is look-ahead bias.
       if (useReal) {
         skewVal          = SKEW_REAL[i - 1];
         skewMultShortVal = Math.max(skewToMult(shortOTMp, skewVal), 1.0);
         skewMultLongVal  = Math.max(skewToMult(longOTMf,  skewVal), 1.0);
-        sigmaS           = Math.max((vixRaw / 100) * skewMultShortVal, 0.05);
-        sigmaL           = Math.max((vixRaw / 100) * skewMultLongVal,  0.05);
+        sigmaS           = Math.max((vixEntry / 100) * skewMultShortVal, 0.05);
+        sigmaL           = Math.max((vixEntry / 100) * skewMultLongVal,  0.05);
       } else {
         skewVal          = null;
         skewMultShortVal = skewShort;
         skewMultLongVal  = skewLong;
-        sigmaS           = Math.max((vixRaw / 100) * skewShort, 0.05);
-        sigmaL           = Math.max((vixRaw / 100) * skewLong,  0.05);
+        sigmaS           = Math.max((vixEntry / 100) * skewShort, 0.05);
+        sigmaL           = Math.max((vixEntry / 100) * skewLong,  0.05);
       }
       shortPrem   = bsPut(S0chain, K1, r, dteDays / 365, sigmaS);
       longPrem    = bsPut(S0chain, K2, r, dteDays / 365, sigmaL);
@@ -332,6 +381,20 @@ function runBacktest(params) {
     //   margin_pct  : close when loss ≥ N% of margin per share     (e.g. 50%)
     //   dollar      : close when loss ≥ $N per contract (÷100 → per share)
     // Triggered by: actual intra-month low (real SPY) or Brownian bridge estimate (sim).
+    //
+    // ── REALISM ADJUSTMENTS ──
+    // Original model: pnlSh = stopLevel exactly — perfect execution, no friction.
+    // This understates real losses in two ways:
+    //
+    // 1. Close-out slippage: closing a spread under stress costs another round-trip.
+    //    Applied as a second slippage charge (same $/contract as entry slippage).
+    //
+    // 2. Gap-through penalty: in fast markets (large intra-month moves) the market
+    //    gaps through the stop price before you can execute. Modelled as a fraction
+    //    of the spread width, scaled by how far SPY fell through K1.
+    //    Gap factor: 0 when sLow just touches K1, up to 15% of spread width when
+    //    SPY blows through the full spread (sLow ≤ K2).
+    //    Formula: gapPenalty = spreadWidth × 0.15 × clamp((K1-sLow)/(K1-K2), 0, 1)
     let pnlSh = rawPnlSh;
     let stopped = false;
     const hasStop = stopLossType !== 'none' && stopLossVal > 0;
@@ -349,12 +412,29 @@ function runBacktest(params) {
         else            worstPnl = netPrem - (K1 - sLow);
 
         if (worstPnl < stopLevel) {
-          pnlSh = stopLevel;
+          // Close-out slippage: closing a spread under stress costs another round-trip.
+          // slippage is already in $/share (e.g. $3/contract = $0.03/share).
+          const closeSlippage = slippage / 100;
+
+          // Gap-through penalty: in fast markets the stop price gaps before execution.
+          // Scaled by how deep SPY broke through K1 relative to the spread width.
+          //   gapDepth = 0 → SPY just touched K1
+          //   gapDepth = 1 → SPY blew through the full spread to K2 or beyond
+          // Max penalty = 15% of spread width (absolute $/share).
+          // e.g. 3% spread on $430 SPY → spreadWidth=$12.90, max gap=$1.94/share
+          const spreadWidth = K1 - K2;
+          const gapDepth    = Math.min(Math.max((K1 - sLow) / spreadWidth, 0), 1);
+          const gapPenalty  = spreadWidth * 0.15 * gapDepth;
+
+          pnlSh = stopLevel - closeSlippage - gapPenalty;
           stopped = true;
         }
       }
       if (!stopped && rawPnlSh < stopLevel) {
-        pnlSh = stopLevel;
+        // End-of-month settlement below stop but path didn't breach K1 intra-month:
+        // still add close-out slippage (no gap penalty — move was gradual)
+        const closeSlippage = slippage / 100;
+        pnlSh = stopLevel - closeSlippage;
         stopped = true;
       }
     }
@@ -366,15 +446,10 @@ function runBacktest(params) {
     let exitedAt21  = false;
 
     // Dates for this trade (from chain or fallback)
+    // Note: entryDate and vixEntry are already computed above (before the skip check).
     const chainMeta  = useChain ? OPTIONS_CHAIN?.chain[chainKey] : null;
-    const entryDate  = chainMeta?.entry_date  ?? (SPY_ENTRY_DATE ? SPY_ENTRY_DATE[i - 1] : null);
     const expiryDate = chainMeta?.expiry_date ?? null;
     const midDate    = chainMeta?.mid_date    ?? null;
-
-    // vixEntry: VIX on actual entry date (fixes look-ahead bias vs prior month-end VIX)
-    const vixEntry = (VIX_DAILY && entryDate && VIX_DAILY[entryDate] != null)
-      ? VIX_DAILY[entryDate]
-      : vixRaw;  // fallback to prior month-end
 
     if (!stopped && useChain && exitStrategy !== 'expiry') {
       const chainMonth  = OPTIONS_CHAIN?.chain[chainKey];
@@ -465,7 +540,8 @@ function runBacktest(params) {
       skipped:    false,
       scenario,   // derived from exitType, kept for chart colours
       entryDate, expiryDate, closeDate,
-      vixEntry:   +vixEntry.toFixed(2),
+      vixEntry:     +vixEntry.toFixed(2),
+      vixFilterVal: +vixFilterVal.toFixed(2),
       rfr:        +(r * 100).toFixed(2),
       breachProb: +breachProb.toFixed(2),
       sLow:       +sLow.toFixed(1),
@@ -614,6 +690,8 @@ function getParams() {
     skewLong:     g('skewLong'),
     vixFloor:     g('vixFloor'),
     vixCeil:      g('vixCeil'),
+    vixLookback:  parseInt(document.getElementById('vixLookback')?.value) || 0,
+    vixLookbackField: document.getElementById('vixField')?.value || 'close',
     stopLossType:  document.getElementById('stopLossType').value,
     stopLossVal:   g('stopLossVal') || 0,
     exitStrategy:  document.getElementById('exitStrategy').value,
@@ -1031,6 +1109,8 @@ function openTradeLog() {
     skewLong:   p.skewLong,
     vixFloor:   p.vixFloor,
     vixCeil:    p.vixCeil,
+    vixLookback: p.vixLookback,
+    vixField:    p.vixLookbackField,
     stopLossType:  p.stopLossType,
     stopLossVal:   p.stopLossVal,
     exitStrategy:  p.exitStrategy,

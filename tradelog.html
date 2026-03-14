@@ -93,6 +93,17 @@
         <div class="ctrl-label">VIX ceil</div>
         <input type="number" id="vixCeil" value="999" min="10" max="999" step="5">
       </div>
+      <div class="ctrl" style="min-width:72px" title="Trading days before entry to sample VIX for the filter. 0 = on entry day itself.">
+        <div class="ctrl-label">VIX days ago</div>
+        <input type="number" id="vixLookback" value="0" min="0" max="30" step="1">
+      </div>
+      <div class="ctrl" id="vixFieldCtrl" style="display:none;min-width:60px" title="Use VIX open or close on the lookback day">
+        <div class="ctrl-label">O / C</div>
+        <select id="vixField">
+          <option value="close">Close</option>
+          <option value="open">Open</option>
+        </select>
+      </div>
     </div>
 
     <!-- Row 3: Sim-only skew — hidden in real mode -->
@@ -188,7 +199,8 @@
             <th onclick="sortBy('entryDate')"     title="Date trade was opened">Entry</th>
             <th onclick="sortBy('closeDate')"     title="Date trade was closed">Close</th>
             <th onclick="sortBy('expiryDate')"    title="Options expiry date (3rd Friday)">Expiry</th>
-            <th onclick="sortBy('vixEntry')"      title="VIX on actual entry date">VIX entry</th>
+            <th onclick="sortBy('vixEntry')"      title="VIX on actual entry date (close)">VIX entry</th>
+            <th onclick="sortBy('vixFilterVal')"  title="VIX value used for floor/ceiling filter (may be N days prior, open or close)">VIX filter</th>
             <th onclick="sortBy('vix')"           title="VIX close at prior month-end">VIX prev</th>
             <th onclick="sortBy('vixHigh')"       title="Highest VIX daily HIGH during the trade month (real mode only)">VIX peak</th>
             <th onclick="sortBy('skewVal')"       title="CBOE SKEW index at entry (real mode only)">SKEW</th>
@@ -214,7 +226,7 @@
           </tr>
         </thead>
         <tbody id="tableBody">
-          <tr><td colspan="25" class="empty-state">Loading CBOE data…</td></tr>
+          <tr><td colspan="26" class="empty-state">Loading CBOE data…</td></tr>
         </tbody>
       </table>
     </div>
@@ -251,6 +263,13 @@ function loadParamsFromURL() {
   set('skewLong',  'skewLong',  1.50);
   set('vixFloor',  'vixFloor',  0);
   set('vixCeil',   'vixCeil',   999);
+  set('vixLookback', 'vixLookback', 0);
+  const vixFieldEl = document.getElementById('vixField');
+  if (vixFieldEl && p.get('vixField')) vixFieldEl.value = p.get('vixField');
+  // Show O/C select if lookback > 0
+  const lb = parseInt(p.get('vixLookback') || '0');
+  const vixFieldCtrl = document.getElementById('vixFieldCtrl');
+  if (vixFieldCtrl) vixFieldCtrl.style.display = lb > 0 ? '' : 'none';
   // Exit strategy
   const exitEl = document.getElementById('exitStrategy');
   if (exitEl) exitEl.value = p.get('exitStrategy') || 'expiry';
@@ -304,6 +323,8 @@ function getParams() {
     skewLong:     g('skewLong'),
     vixFloor:     g('vixFloor'),
     vixCeil:      g('vixCeil'),
+    vixLookback:  parseInt(document.getElementById('vixLookback')?.value) || 0,
+    vixLookbackField: document.getElementById('vixField')?.value || 'close',
     stopLossType:  document.getElementById('stopLossType').value,
     stopLossVal:   g('stopLossVal') || 0,
     exitStrategy:  document.getElementById('exitStrategy').value,
@@ -410,7 +431,7 @@ function buildRows(data) {
   document.getElementById('rowCount').textContent = `${data.length} rows`;
 
   if (data.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="25" class="empty-state">No rows match filter</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="26" class="empty-state">No rows match filter</td></tr>`;
     return;
   }
 
@@ -419,7 +440,7 @@ function buildRows(data) {
   data.forEach(m => {
     if (m.year !== lastYear) {
       lastYear = m.year;
-      html += `<tr class="year-group"><td colspan="25">${m.year}</td></tr>`;
+      html += `<tr class="year-group"><td colspan="26">${m.year}</td></tr>`;
     }
 
     const rowCls = m.scenario === 'skipped' ? 'row-skipped' : '';
@@ -460,6 +481,7 @@ function buildRows(data) {
       <td class="c-muted" style="font-size:10px;${(m.exitedAt21||m.profitTaken)?'color:var(--accent)':''}">${m.closeDate ?? '—'}</td>
       <td class="c-muted" style="font-size:10px">${m.expiryDate ?? '—'}</td>
       <td class="${m.vixEntry != null && Math.abs((m.vixEntry??0)-(m.vix??0))>=1.5 ? 'c-orange' : 'c-muted'}">${m.vixEntry != null ? m.vixEntry : '—'}</td>
+      <td class="${m.vixFilterVal != null && m.vixFilterVal !== m.vixEntry ? 'c-blue' : 'c-muted'}" title="VIX filter value used for skip decision">${m.vixFilterVal != null ? m.vixFilterVal.toFixed(1) : '—'}</td>
       <td class="${vixColor(m.vix)}">${m.vix}</td>
       <td>${vixPeakCell}</td>
       <td>${skewCell}</td>
@@ -513,7 +535,7 @@ function sortBy(col) {
   if (sortCol === col) sortDir *= -1;
   else { sortCol = col; sortDir = 1; }
   document.querySelectorAll('table.tl th').forEach(th => th.classList.remove('sort-asc','sort-desc'));
-  const cols = ['date','scenario','vix','vixHigh','skewVal','skewMultShort','rfr','S0','S1',null,'K1','K2','netPrem','margPerSh','premiumPct','retPct','dollarPnl','cap','dd','sLow','breachProb'];
+  const cols = ['date','outcome','exitType','entryDate','closeDate','expiryDate','vixEntry','vixFilterVal','vix','vixHigh','skewVal','skewMultShort','rfr','S0','S1',null,'K1','K2','netPrem','margPerSh','premiumPct','retPct','dollarPnl','cap','marginDeployed','freeCap','dd','sLow','breachProb','pricingMode'];
   const idx = cols.indexOf(col);
   if (idx >= 0) document.querySelectorAll('table.tl th')[idx].classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
   applyFilter();
@@ -590,6 +612,10 @@ document.getElementById('ctrlPanel').addEventListener('change', function(e) {
   const id = e.target.id;
   if (id === 'dataSource') { lockYearRange(); updateSkewControls(); }
   if (id === 'stopLossType') updateStopLossControls();
+  if (id === 'vixLookback') {
+    const lb = parseInt(e.target.value) || 0;
+    document.getElementById('vixFieldCtrl').style.display = lb > 0 ? '' : 'none';
+  }
   if (id === 'smaFilter') {
     document.getElementById('smaDaysCtrl').style.display = e.target.checked ? '' : 'none';
   }
